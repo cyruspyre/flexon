@@ -2,15 +2,23 @@ pub use crate::{error::Error, parser::Parser};
 
 use crate::{span::Span, value::Value};
 
-mod error;
+#[cfg(feature = "metadata")]
 mod metadata;
+
+mod error;
 mod misc;
 mod parser;
 mod span;
 pub mod value;
 
 pub fn parse_with(src: &str, comma: bool, trailing_comma: bool) -> Result<Span<Value>, Error> {
-    Parser::new(src, comma, trailing_comma).parse().map(|v| v.0)
+    Parser::new(src, comma, trailing_comma).parse().map(|v| {
+        #[cfg(feature = "comment")]
+        return v.0;
+
+        #[cfg(not(feature = "comment"))]
+        v
+    })
 }
 
 pub fn parse(src: &str) -> Result<Span<Value>, Error> {

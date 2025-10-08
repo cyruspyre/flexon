@@ -1,6 +1,8 @@
+#[cfg(feature = "metadata")]
+use crate::metadata::Metadata;
+
 use crate::{
     error::Error,
-    metadata::Metadata,
     misc::Bypass,
     span::Span,
     value::{Number, Value},
@@ -13,7 +15,10 @@ pub struct Parser<'a> {
     index: usize,
     comma: bool,
     trailing_comma: bool,
+    #[cfg(feature = "metadata")]
     metadata: Metadata<'a>,
+    #[cfg(all(feature = "comment", not(feature = "metadata")))]
+    cmnts: Vec<&'a str>,
 }
 
 impl<'a> Parser<'a> {
@@ -23,13 +28,27 @@ impl<'a> Parser<'a> {
             comma,
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
+            #[cfg(feature = "metadata")]
             metadata: Metadata {
                 lines: Vec::new(),
                 cmnts: Vec::new(),
             },
+            #[cfg(all(feature = "comment", not(feature = "metadata")))]
+            cmnts: Vec::new(),
         }
     }
 
+    #[cfg(all(not(feature = "metadata"), not(feature = "comment")))]
+    pub fn parse(mut self) -> Result<Span<Value>, Error> {
+        self.value()
+    }
+
+    #[cfg(all(feature = "comment", not(feature = "metadata")))]
+    pub fn parse(mut self) -> Result<(Span<Value>, Vec<&'a str>), Error> {
+        self.value().map(|v| (v, self.cmnts))
+    }
+
+    #[cfg(feature = "metadata")]
     pub fn parse(mut self) -> Result<(Span<Value>, Metadata<'a>), Error> {
         self.value().map(|v| {
             self.metadata.lines.push(self.index);
@@ -46,6 +65,7 @@ impl<'a> Parser<'a> {
             None => return 0,
         };
 
+        #[cfg(feature = "metadata")]
         if tmp == b'\n' && self.metadata.lines.last().is_some_and(|v| *v < index) {
             self.metadata.lines.push(index)
         }
@@ -54,7 +74,9 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_whitespace(&mut self) -> u8 {
+        #[cfg(feature = "comment")]
         let mut count = 0;
+        #[cfg(feature = "comment")]
         let mut flag = 0;
 
         loop {
@@ -62,27 +84,34 @@ impl<'a> Parser<'a> {
 
             if tmp == 0 {
                 return 0;
-            } else if flag > 0 {
-                if flag == 1 && tmp == b'\n'
-                    || flag == 2
-                        && tmp == b'*'
-                        && *self.src.get(self.index + 1).unwrap_or(&0) == b'/'
-                        && {
-                            self.index += 1;
-                            true
-                        }
+            }
+
+            #[cfg(feature = "comment")]
+            if flag > 0 {
+                if flag == 1 && tmp == b'\n' {
+                } else if flag == 2
+                    && tmp == b'*'
+                    && *self.src.get(self.index + 1).unwrap_or(&0) == b'/'
                 {
-                    let start = self.index - count;
-
-                    self.metadata.cmnts.push((start, flag == 2, unsafe {
-                        str::from_utf8_unchecked(&self.src[start..self.index])
-                    }));
-
-                    flag = 0;
-                    count = 0;
+                    self.index += 1
                 } else {
-                    count += 1
+                    count += 1;
+                    continue;
                 }
+
+                let start = self.index - count;
+                let cmnt = unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) };
+
+                #[cfg(feature = "metadata")]
+                self.metadata.cmnts.push((start, flag == 2, unsafe {
+                    str::from_utf8_unchecked(&self.src[start..self.index])
+                }));
+
+                #[cfg(all(feature = "comment", not(feature = "metadata")))]
+                self.cmnts.push(cmnt);
+
+                flag = 0;
+                count = 0;
             } else if tmp == b'/' {
                 let tmp = self.src[self.index + 1];
 
@@ -96,7 +125,9 @@ impl<'a> Parser<'a> {
 
                 self.index += 1;
                 continue;
-            } else if !tmp.is_ascii_whitespace() {
+            }
+
+            if !tmp.is_ascii_whitespace() {
                 self.index -= 1;
 
                 return tmp;
