@@ -1,0 +1,20 @@
+[package]
+name = "flexon"
+version = "0.1.0"
+edition = "2024"
+
+[profile.dev]
+overflow-checks = false
+
+[profile.release]
+lto = true
+
+[dev-dependencies]
+criterion = "0.7.0"
+
+[lib]
+bench = false
+
+[[bench]]
+name = "parse"
+harness = false
