@@ -12,6 +12,7 @@ use std::hint::unreachable_unchecked;
 
 pub struct Parser<'a> {
     src: &'a [u8],
+    stamp: usize,
     index: usize,
     comma: bool,
     trailing_comma: bool,
@@ -24,8 +25,9 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(src: &'a str, comma: bool, trailing_comma: bool) -> Self {
         Self {
-            src: src.as_bytes(),
             comma,
+            stamp: 0,
+            src: src.as_bytes(),
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
             #[cfg(feature = "metadata")]
@@ -38,22 +40,34 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline(always)]
+    fn _parse<T>(mut self, handler: impl Fn(Span<Value>, Self) -> T) -> Result<T, Span<Error>> {
+        match self.value() {
+            Ok(v) => Ok(handler(v, self)),
+            Err(data) => Err(Span {
+                data,
+                start: match self.stamp {
+                    0 => self.index,
+                    v => v,
+                },
+                end: self.index,
+            }),
+        }
+    }
+
     #[cfg(all(not(feature = "metadata"), not(feature = "comment")))]
-    pub fn parse(mut self) -> Result<Span<Value>, Error> {
-        self.value()
+    pub fn parse(self) -> Result<Span<Value>, Span<Error>> {
+        self._parse(|v, _| v)
     }
 
     #[cfg(all(feature = "comment", not(feature = "metadata")))]
-    pub fn parse(mut self) -> Result<(Span<Value>, Vec<&'a str>), Error> {
-        self.value().map(|v| (v, self.cmnts))
+    pub fn parse(self) -> Result<(Span<Value>, Vec<&'a str>), Span<Error>> {
+        self._parse(|a, b| (a, b.cmnts))
     }
 
     #[cfg(feature = "metadata")]
-    pub fn parse(mut self) -> Result<(Span<Value>, Metadata<'a>), Error> {
-        self.value().map(|v| {
-            self.metadata.lines.push(self.index);
-            (v, self.metadata)
-        })
+    pub fn parse(self) -> Result<(Span<Value>, Metadata<'a>), Span<Error>> {
+        self._parse(|a, b| (a, b.metadata))
     }
 
     fn next(&mut self) -> u8 {
@@ -136,7 +150,7 @@ impl<'a> Parser<'a> {
                 self.index += 1;
                 continue;
             }
-            
+
             if !tmp.is_ascii_whitespace() {
                 self.index = self.index.wrapping_sub(1);
 
@@ -157,7 +171,8 @@ impl<'a> Parser<'a> {
 
     fn expect(&mut self, de: u8) -> Result<(), Error> {
         if !self.might(de) {
-            return Err(Error::Expected);
+            self.index += 1;
+            return Err(Error::Expected(de as char));
         }
 
         Ok(())
@@ -172,23 +187,26 @@ impl<'a> Parser<'a> {
                 b'"' => self.string(),
                 b'{' => self.object(),
                 b'[' => self.array(),
-                v if v == b'-' || v.is_ascii_digit() => self.number(),
+                v if v == b'-' || v == b'.' || v.is_ascii_digit() => self.number(),
                 _ => break 'tmp,
             };
         };
 
         let start = self.index + 1;
+
         while self.next().is_ascii_alphabetic() {}
+
         let tmp = &self.src[start..self.index];
+        let data = match tmp {
+            b"true" | b"false" => Value::Boolean(tmp.len() == 4),
+            b"null" => Value::Null,
+            _ => return Err(Error::UnexpectedToken),
+        };
 
         self.index -= 1;
 
         Ok(Span {
-            data: match tmp {
-                b"true" | b"false" => Value::Boolean(tmp.len() == 4),
-                b"null" => Value::Null,
-                _ => return Err(Error::Unexpected),
-            },
+            data,
             start,
             end: self.index,
         })
@@ -264,6 +282,7 @@ impl<'a> Parser<'a> {
 
         let start = self.index;
         let mut buf = Vec::new();
+        let mut err = false;
 
         loop {
             let tmp = match self.next() {
@@ -274,7 +293,10 @@ impl<'a> Parser<'a> {
                     b'r' => b'\r',
                     b'n' => b'\n',
                     b'\\' => b'\\',
-                    _ => return Err(Error::InvalidEscapeSequnce),
+                    v => {
+                        err = true;
+                        v
+                    }
                 },
                 v => v,
             };
@@ -284,6 +306,11 @@ impl<'a> Parser<'a> {
             }
 
             buf.push(tmp)
+        }
+
+        if err {
+            self.stamp = start;
+            return Err(Error::InvalidEscapeSequnce);
         }
 
         Ok(Span {
@@ -311,11 +338,21 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if self.src[self.index] == b'.' {
-            return Err(Error::TrailingDecimal);
+        self.index -= 1;
+
+        'tmp: {
+            let tmp = match self.src[start] {
+                b'.' => Error::LeadingDecimal,
+                b'-' if self.index == start => Error::MissingDigitAfterNegative,
+                _ if self.src[self.index] == b'.' => Error::TrailingDecimal,
+                _ => break 'tmp,
+            };
+
+            self.stamp = start;
+            return Err(tmp);
         }
 
-        let data = unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) };
+        let data = unsafe { str::from_utf8_unchecked(&self.src[start..=self.index]) };
         let data = if dot && let Ok(v) = data.parse() {
             Number::Float(v)
         } else if neg && let Ok(v) = data.parse() {
@@ -323,10 +360,9 @@ impl<'a> Parser<'a> {
         } else if let Ok(v) = data.parse() {
             Number::Unsigned(v)
         } else {
-            unsafe { unreachable_unchecked() }
+            self.stamp = start;
+            return Err(Error::NumberOverflow);
         };
-
-        self.index -= 1;
 
         return Ok(Span {
             data: Value::Number(data),
