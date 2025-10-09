@@ -134,7 +134,10 @@ impl<'a> Parser<'a> {
                 }
 
                 self.index += 1;
-            } else if !tmp.is_ascii_whitespace() {
+                continue;
+            }
+            
+            if !tmp.is_ascii_whitespace() {
                 self.index = self.index.wrapping_sub(1);
 
                 return tmp;
