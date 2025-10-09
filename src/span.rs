@@ -32,3 +32,15 @@ impl<T: PartialEq> PartialEq for Span<T> {
 }
 
 impl<T: Eq> Eq for Span<T> {}
+
+impl<T: Clone> Clone for Span<T> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            start: self.start.clone(),
+            end: self.end.clone(),
+        }
+    }
+}
+
+impl<T: Copy> Copy for Span<T> {}

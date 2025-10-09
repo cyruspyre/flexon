@@ -1,6 +1,9 @@
+use crate::span::Span;
+
+#[derive(Debug)]
 pub struct Metadata<'a> {
     pub(crate) lines: Vec<usize>,
-    pub(crate) cmnts: Vec<(usize, bool, &'a str)>,
+    pub(crate) cmnts: Vec<Span<(bool, &'a str)>>,
 }
 
 impl Metadata<'_> {
@@ -11,34 +14,26 @@ impl Metadata<'_> {
         }
     }
 
-    pub fn find_comment(&self, pos: usize) -> Option<&(usize, bool, &'_ str)> {
-        let tmp = self.line_index(pos);
-        let start = match self.lines.get(tmp - 1) {
-            Some(v) => *v,
-            _ => 0,
-        };
-        let end = self.lines[tmp];
-
-        if start > pos || pos >= end {
-            return None;
-        }
-
-        let tmp = match self.cmnts.binary_search_by(|v| v.0.cmp(&pos)) {
+    pub fn find_comment(&self, pos: usize) -> Option<Span<(bool, &'_ str)>> {
+        let idx = match self.cmnts.binary_search_by(|v| v.start.cmp(&pos)) {
             Ok(v) => v,
-            Err(v) => v,
+            Err(v) => v.wrapping_sub(1),
         };
-        let Some(cmnt) = self.cmnts.get(tmp) else {
+        let Some(cmnt) = self.cmnts.get(idx) else {
             return None;
         };
 
-        if cmnt.0 > end {
-            return self.cmnts.get(tmp - 1);
+        if pos < cmnt.start || pos > cmnt.end {
+            return None;
         }
 
-        if cmnt.0 < start {
-            return self.cmnts.get(tmp + 1);
-        }
+        Some(*cmnt)
+    }
 
-        return Some(cmnt);
+    pub fn find_comment_by_line(&self, idx: usize) -> Option<Span<(bool, &'_ str)>> {
+        match self.lines.get(idx) {
+            Some(v) => self.find_comment(v.wrapping_sub(1)),
+            _ => None,
+        }
     }
 }

@@ -57,7 +57,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next(&mut self) -> u8 {
-        self.index += 1;
+        self.index = self.index.wrapping_add(1);
 
         let index = self.index;
         let tmp = match self.src.get(index) {
@@ -66,7 +66,12 @@ impl<'a> Parser<'a> {
         };
 
         #[cfg(feature = "metadata")]
-        if tmp == b'\n' && self.metadata.lines.last().is_some_and(|v| *v < index) {
+        if tmp == b'\n'
+            && match self.metadata.lines.last() {
+                Some(v) => *v < index,
+                _ => true,
+            }
+        {
             self.metadata.lines.push(index)
         }
 
@@ -88,24 +93,29 @@ impl<'a> Parser<'a> {
 
             #[cfg(feature = "comment")]
             if flag > 0 {
-                if flag == 1 && tmp == b'\n' {
+                let tmp = if flag == 1 && tmp == b'\n' {
+                    -1
                 } else if flag == 2
                     && tmp == b'*'
                     && *self.src.get(self.index + 1).unwrap_or(&0) == b'/'
                 {
-                    self.index += 1
+                    1
                 } else {
                     count += 1;
                     continue;
-                }
+                };
 
                 let start = self.index - count;
                 let cmnt = unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) };
 
+                self.index = self.index.wrapping_add_signed(tmp);
+
                 #[cfg(feature = "metadata")]
-                self.metadata.cmnts.push((start, flag == 2, unsafe {
-                    str::from_utf8_unchecked(&self.src[start..self.index])
-                }));
+                self.metadata.cmnts.push(Span {
+                    data: (flag == 2, cmnt),
+                    start: start - 2,
+                    end: self.index,
+                });
 
                 #[cfg(all(feature = "comment", not(feature = "metadata")))]
                 self.cmnts.push(cmnt);
@@ -124,11 +134,8 @@ impl<'a> Parser<'a> {
                 }
 
                 self.index += 1;
-                continue;
-            }
-
-            if !tmp.is_ascii_whitespace() {
-                self.index -= 1;
+            } else if !tmp.is_ascii_whitespace() {
+                self.index = self.index.wrapping_sub(1);
 
                 return tmp;
             }
@@ -177,9 +184,7 @@ impl<'a> Parser<'a> {
             data: match tmp {
                 b"true" | b"false" => Value::Boolean(tmp.len() == 4),
                 b"null" => Value::Null,
-                _ => {
-                    return Err(Error::Unexpected);
-                }
+                _ => return Err(Error::Unexpected),
             },
             start,
             end: self.index,
@@ -193,7 +198,7 @@ impl<'a> Parser<'a> {
         mut data: T,
         mut handler: impl FnMut(&mut T) -> Result<(), Error>,
     ) -> Result<Span<Value>, Error> {
-        self.index += 1;
+        self.index = self.index.wrapping_add(1);
 
         let start = self.index;
 
@@ -252,7 +257,7 @@ impl<'a> Parser<'a> {
     }
 
     fn string(&mut self) -> Result<Span<Value>, Error> {
-        self.index += 1;
+        self.expect(b'"')?;
 
         let start = self.index;
         let mut buf = Vec::new();
