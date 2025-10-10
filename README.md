@@ -59,8 +59,8 @@ assert!(comments.find_comment_by_line(7).unwrap());
 `line-count`: Include line information and allow searching comments by line index. Performance overhead is somewhat minimal.
 
 ## Performance
-This was created solely for parsing JSONC with span support, so it has overhead than crates like `serde-json` or `simd-json`. If you compare this with them... you’ll see that they’re more than 2× faster, even with all the features disabled.
+This was created solely for parsing JSONC with span support, so it has overhead than crates like [`serde-json`](https://crates.io/crates/serde_json) or [`simd-json`](https://crates.io/crates/simd-json). If you compare this with them... you’ll see that they’re more than 2× faster, even with all the features disabled.
 
-I can’t really justify thinking it’s slow *just* because of span support... but, but! This crate is also more than 2× faster than other crates that do similar thing, e.g. `spanned_json_parser`, `jsonc-parser`, or any other crates in general. **Source? Trust me, bro.**
+I can’t really justify thinking it’s slow *just* because of span support... but, but! This crate is also more than 2× faster than other crates that do similar thing, e.g. [`spanned-json-parser`](https://crates.io/crates/spanned_json_parser), [`jsonc-parser`](https://crates.io/crates/jsonc-parser), or any other crates in general. **Source? Trust me, bro.**
 
 Even though it can parse standard, strict JSON, you shouldn’t use it for that. Unless you need to parse JSON with comments or span support, don’t torture yourself and just use one of the faster crates mentioned earlier.
