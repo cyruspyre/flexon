@@ -5,7 +5,7 @@ edition = "2024"
 description = "Yet another JSON parser"
 repository = "https://github.com/cyruspyre/flexon"
 license = "MIT"
-exclude = ["benches/", "data/"]
+exclude = ["benches/", "data/", ".gitignore"]
 
 [profile.release]
 lto = true
