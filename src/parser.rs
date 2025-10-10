@@ -1,4 +1,4 @@
-#[cfg(feature = "metadata")]
+#[cfg(feature = "line-count")]
 use crate::metadata::Metadata;
 
 use crate::{
@@ -16,10 +16,10 @@ pub struct Parser<'a> {
     index: usize,
     comma: bool,
     trailing_comma: bool,
-    #[cfg(feature = "metadata")]
+    #[cfg(feature = "line-count")]
     metadata: Metadata<'a>,
-    #[cfg(all(feature = "comment", not(feature = "metadata")))]
-    cmnts: Vec<&'a str>,
+    #[cfg(all(feature = "comment", not(feature = "line-count")))]
+    cmnts: Vec<Span<(&'a str, bool)>>,
 }
 
 impl<'a> Parser<'a> {
@@ -30,12 +30,12 @@ impl<'a> Parser<'a> {
             src: src.as_bytes(),
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
-            #[cfg(feature = "metadata")]
+            #[cfg(feature = "line-count")]
             metadata: Metadata {
                 lines: Vec::new(),
                 cmnts: Vec::new(),
             },
-            #[cfg(all(feature = "comment", not(feature = "metadata")))]
+            #[cfg(all(feature = "comment", not(feature = "line-count")))]
             cmnts: Vec::new(),
         }
     }
@@ -55,17 +55,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[cfg(all(not(feature = "metadata"), not(feature = "comment")))]
+    #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
     pub fn parse(self) -> Result<Span<Value>, Span<Error>> {
         self._parse(|v, _| v)
     }
 
-    #[cfg(all(feature = "comment", not(feature = "metadata")))]
-    pub fn parse(self) -> Result<(Span<Value>, Vec<&'a str>), Span<Error>> {
+    #[cfg(all(feature = "comment", not(feature = "line-count")))]
+    pub fn parse(self) -> Result<(Span<Value>, Vec<Span<(&'a str, bool)>>), Span<Error>> {
         self._parse(|a, b| (a, b.cmnts))
     }
 
-    #[cfg(feature = "metadata")]
+    #[cfg(feature = "line-count")]
     pub fn parse(self) -> Result<(Span<Value>, Metadata<'a>), Span<Error>> {
         self._parse(|a, b| (a, b.metadata))
     }
@@ -79,7 +79,7 @@ impl<'a> Parser<'a> {
             None => return 0,
         };
 
-        #[cfg(feature = "metadata")]
+        #[cfg(feature = "line-count")]
         if tmp == b'\n'
             && match self.metadata.lines.last() {
                 Some(v) => *v < index,
@@ -120,19 +120,22 @@ impl<'a> Parser<'a> {
                 };
 
                 let start = self.index - count;
-                let cmnt = unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) };
+                let data = Span {
+                    data: (
+                        unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) },
+                        flag == 2,
+                    ),
+                    start: start - 2,
+                    end: self.index,
+                };
 
                 self.index = self.index.wrapping_add_signed(tmp);
 
-                #[cfg(feature = "metadata")]
-                self.metadata.cmnts.push(Span {
-                    data: (flag == 2, cmnt),
-                    start: start - 2,
-                    end: self.index,
-                });
+                #[cfg(feature = "line-count")]
+                self.metadata.cmnts.push(data);
 
-                #[cfg(all(feature = "comment", not(feature = "metadata")))]
-                self.cmnts.push(cmnt);
+                #[cfg(all(feature = "comment", not(feature = "line-count")))]
+                self.cmnts.push(data);
 
                 flag = 0;
                 count = 0;
@@ -163,7 +166,7 @@ impl<'a> Parser<'a> {
         let tmp = self.skip_whitespace() == de;
 
         if tmp {
-            self.index += 1
+            self.index = self.index.wrapping_add(1)
         }
 
         tmp
@@ -192,7 +195,7 @@ impl<'a> Parser<'a> {
             };
         };
 
-        let start = self.index + 1;
+        let start = self.index.wrapping_add(1);
 
         while self.next().is_ascii_alphabetic() {}
 
@@ -323,7 +326,7 @@ impl<'a> Parser<'a> {
     #[inline(always)]
     fn number(&mut self) -> Result<Span<Value>, Error> {
         let mut dot = false;
-        let start = self.index + 1;
+        let start = self.index.wrapping_add(1);
         let neg = self.might(b'-');
 
         loop {

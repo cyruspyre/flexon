@@ -1,9 +1,14 @@
-pub use crate::{error::Error, parser::Parser};
+pub use crate::{error::Error, parser::Parser, span::Span};
+#[cfg(all(feature = "comment", not(feature = "line-count")))]
+pub use find_comment::FindComment;
 
-use crate::{span::Span, value::Value};
+use crate::value::Value;
 
-#[cfg(feature = "metadata")]
+#[cfg(feature = "line-count")]
 mod metadata;
+
+#[cfg(feature = "comment")]
+mod find_comment;
 
 mod error;
 mod misc;

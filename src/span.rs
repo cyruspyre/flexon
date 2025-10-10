@@ -1,10 +1,34 @@
-use std::hash::Hash;
+use std::{fmt::Debug, hash::Hash, ops::Deref};
 
-#[derive(Debug)]
 pub struct Span<T> {
-    pub data: T,
-    pub start: usize,
-    pub end: usize,
+    pub(crate) data: T,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+impl<T> Span<T> {
+    #[inline]
+    pub fn data(&self) -> &T {
+        &self.data
+    }
+
+    #[inline]
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    #[inline]
+    pub fn end(&self) -> usize {
+        self.end
+    }
+}
+
+impl<T> Deref for Span<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
 }
 
 impl<T: PartialOrd> PartialOrd for Span<T> {
@@ -44,3 +68,17 @@ impl<T: Clone> Clone for Span<T> {
 }
 
 impl<T: Copy> Copy for Span<T> {}
+
+impl<T: Debug> Debug for Span<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            return self.data.fmt(f);
+        }
+
+        f.debug_struct("Span")
+            .field("data", &self.data)
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .finish()
+    }
+}

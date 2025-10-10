@@ -1,6 +1,6 @@
 [package]
 name = "flexon"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 
 [profile.release]
@@ -17,6 +17,10 @@ name = "parse"
 harness = false
 
 [features]
-default = ["comment"]
+default = []
 comment = []
-metadata = ["comment"]
+line-count = ["comment"]
+
+[dependencies]
+paste = "1.0.15"
+serde_json = "1.0.145"
