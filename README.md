@@ -59,7 +59,7 @@ assert!(comments.find_comment_by_line(7).unwrap());
 `line-count`: Include line information and allow searching comments by line index. Performance overhead is somewhat minimal.
 
 ## Performance
-This was created solely for parsing JSONC with span support, so it has overhead than crates like `serde-json` or `simd-json`. If you compare this with them, you’ll see that they’re more than 2× faster, even with all the features disabled.
+This was created solely for parsing JSONC with span support, so it has overhead than crates like `serde-json` or `simd-json`. If you compare this with them... you’ll see that they’re more than 2× faster, even with all the features disabled.
 
 I can’t really justify thinking it’s slow *just* because of span support... but, but! This crate is also more than 2× faster than other crates that do similar thing, e.g. `spanned_json_parser`, `jsonc-parser`, or any other crates in general. **Source? Trust me, bro.**
 
