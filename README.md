@@ -49,7 +49,7 @@ assert!(comments.find_comment(11).is_some());
 
 // With the `line-count` feature enabled, you can find a comment by its line index.
 // In that case, the parser returns `Metadata` instead of `Vec<..>`.
-assert!(comments.find_comment_by_line(7).unwrap());
+assert!(comments.find_comment_by_line(7).is_some());
 ```
 
 ## Features
