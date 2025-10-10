@@ -2,6 +2,10 @@
 name = "flexon"
 version = "0.2.0"
 edition = "2024"
+description = "Yet another JSON parser"
+repository = "https://github.com/cyruspyre/flexon"
+license = "MIT"
+exclude = ["benches/", "data/"]
 
 [profile.release]
 lto = true
