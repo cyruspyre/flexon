@@ -6,6 +6,8 @@ description = "Yet another JSON parser"
 repository = "https://github.com/cyruspyre/flexon"
 license = "MIT"
 exclude = ["benches/", "data/", ".gitignore"]
+categories = ["parser-implementations", "parsing"]
+keywords = ["json", "parser", "span"]
 
 [profile.release]
 lto = true
