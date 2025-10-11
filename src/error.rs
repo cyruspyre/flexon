@@ -5,6 +5,8 @@ pub enum Error {
     Eof,
     /// Expected the given character but found something else
     Expected(char),
+    /// Found additional characters when expecting end of input
+    ExpectedEof,
     /// Unexpected token while parsing
     UnexpectedToken,
     /// Invalid escape sequence in string

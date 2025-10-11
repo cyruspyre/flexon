@@ -46,17 +46,23 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     fn _parse<T>(mut self, handler: impl Fn(Span<Value>, Self) -> T) -> Result<T, Span<Error>> {
-        match self.value() {
-            Ok(v) => Ok(handler(v, self)),
-            Err(data) => Err(Span {
-                data,
-                start: match self.stamp {
-                    0 => self.index,
-                    v => v,
-                },
-                end: self.index,
-            }),
-        }
+        let data = match self.value() {
+            Ok(v) if self.skip_whitespace() == 0 => return Ok(handler(v, self)),
+            Err(v) => v,
+            _ => {
+                self.index += 1;
+                Error::ExpectedEof
+            }
+        };
+
+        Err(Span {
+            data,
+            start: match self.stamp {
+                0 => self.index,
+                v => v,
+            },
+            end: self.index,
+        })
     }
 
     #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
