@@ -58,9 +58,21 @@ assert!(comments.find_comment_by_line(7).is_some());
 
 `line-count`: Include line information and allow searching comments by line index. Performance overhead is somewhat minimal.
 
+`prealloc` (default): Pre-allocate memory for array/object when parsing based on the length of previously parsed array/object. Can improve performance at the cost of potentially increased memory usage. Works particularly well when the JSON has a relatively uniform and repetitive structure.
+
 ## Performance
-This was created solely for parsing JSONC with span support, so it has overhead than crates like [`serde-json`](https://crates.io/crates/serde_json) or [`simd-json`](https://crates.io/crates/simd-json). If you compare this with them... you’ll see that they’re more than 2× faster, even with all the features disabled.
+This was created solely for parsing JSON with span support, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
+```
+serde-json:
+  canada        13.92 ms  154.26 MiB/s
+  twitter        2.41 ms  249.42 MiB/s
+  citm_catalog   4.25 ms  387.38 MiB/s
 
-I can’t really justify thinking it’s slow *just* because of span support... but, but! This crate is also more than 2× faster than other crates that do similar thing, e.g. [`spanned-json-parser`](https://crates.io/crates/spanned_json_parser), [`jsonc-parser`](https://crates.io/crates/jsonc-parser), or any other crates in general. **Source? Trust me, bro.**
+flexon:
+  canada         9.70 ms  221.36 MiB/s
+  twitter        2.91 ms  207.16 MiB/s
+  citm_catalog   4.32 ms  381.06 MiB/s
+```
+Even though it can parse standard, strict JSON, you shouldn’t use it for that unless you need to parse JSON with comments or span support. Don’t torture yourself and just use one of the faster crates mentioned earlier. Fyi, this crate is faster than others that serve a somewhat similar purpose. *Source?* **Trust me, bro.**
 
-Even though it can parse standard, strict JSON, you shouldn’t use it for that. Unless you need to parse JSON with comments or span support, don’t torture yourself and just use one of the faster crates mentioned earlier.
+Other similar crates: [`spanned-json-parser`](https://crates.io/crates/spanned_json_parser) | [`jsonc-parser`](https://crates.io/crates/jsonc-parser)
