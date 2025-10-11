@@ -5,7 +5,7 @@ use crate::{
     error::Error,
     misc::Bypass,
     span::Span,
-    value::{Number, Value},
+    value::{Number, Object, Value},
 };
 
 use std::hint::unreachable_unchecked;
@@ -16,6 +16,8 @@ pub struct Parser<'a> {
     index: usize,
     comma: bool,
     trailing_comma: bool,
+    #[cfg(feature = "prealloc")]
+    prev_sizes: [usize; 2],
     #[cfg(feature = "line-count")]
     metadata: Metadata<'a>,
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
@@ -30,6 +32,8 @@ impl<'a> Parser<'a> {
             src: src.as_bytes(),
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
+            #[cfg(feature = "prealloc")]
+            prev_sizes: [0; 2],
             #[cfg(feature = "line-count")]
             metadata: Metadata {
                 lines: Vec::new(),
@@ -76,7 +80,7 @@ impl<'a> Parser<'a> {
         let index = self.index;
         let tmp = match self.src.get(index) {
             Some(v) => *v,
-            None => return 0,
+            _ => return 0,
         };
 
         #[cfg(feature = "line-count")]
@@ -182,10 +186,8 @@ impl<'a> Parser<'a> {
     }
 
     fn value(&mut self) -> Result<Span<Value>, Error> {
-        let de = self.skip_whitespace();
-
         'tmp: {
-            return match de {
+            return match self.skip_whitespace() {
                 0 => Err(Error::Eof),
                 b'"' => self.string(),
                 b'{' => self.object(),
@@ -197,16 +199,25 @@ impl<'a> Parser<'a> {
 
         let start = self.index.wrapping_add(1);
 
-        while self.next().is_ascii_alphabetic() {}
+        self.index += 4;
 
-        let tmp = &self.src[start..self.index];
-        let data = match tmp {
-            b"true" | b"false" => Value::Boolean(tmp.len() == 4),
+        if self.index >= self.src.len() {
+            return Err(Error::UnexpectedToken);
+        }
+
+        let data = match &self.src[start..=self.index] {
+            b"true" => Value::Boolean(true),
             b"null" => Value::Null,
-            _ => return Err(Error::UnexpectedToken),
-        };
+            _ => {
+                self.index += 1;
 
-        self.index -= 1;
+                if self.index >= self.src.len() || &self.src[start..=self.index] != b"false" {
+                    return Err(Error::UnexpectedToken);
+                }
+
+                Value::Boolean(false)
+            }
+        };
 
         Ok(Span {
             data,
@@ -216,16 +227,22 @@ impl<'a> Parser<'a> {
     }
 
     #[inline(always)]
-    fn field_like<T: Into<Value>>(
+    fn field_like<T>(
         &mut self,
         de: u8,
-        mut data: T,
-        mut handler: impl FnMut(&mut T) -> Result<(), Error>,
+        typ: usize,
+        mut handler: impl FnMut(&mut Vec<T>) -> Result<(), Error>,
+        mut wrap: impl FnMut(Vec<T>) -> Value,
     ) -> Result<Span<Value>, Error> {
         self.index = self.index.wrapping_add(1);
 
         let start = self.index;
         let mut flag = false;
+
+        #[cfg(feature = "prealloc")]
+        let mut data = Vec::with_capacity(self.prev_sizes[typ]);
+        #[cfg(not(feature = "prealloc"))]
+        let mut data = Vec::new();
 
         loop {
             let tmp = self.skip_whitespace();
@@ -252,9 +269,11 @@ impl<'a> Parser<'a> {
         }
 
         self.index += 1;
+        #[cfg(feature = "prealloc")]
+        (self.prev_sizes[typ] = data.len());
 
         return Ok(Span {
-            data: data.into(),
+            data: wrap(data),
             start,
             end: self.index,
         });
@@ -262,30 +281,43 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     fn object(&mut self) -> Result<Span<Value>, Error> {
-        self.bypass().field_like(b'}', Vec::new(), |data| {
-            let key = self.string()?;
-            let key = Span {
-                data: match key.data {
-                    Value::String(v) => v,
-                    _ => unsafe { unreachable_unchecked() },
-                },
-                start: key.start,
-                end: key.end,
-            };
+        self.bypass().field_like(
+            b'}',
+            0,
+            |data| {
+                let key = self.string()?;
+                let key = Span {
+                    data: match key.data {
+                        Value::String(v) => v,
+                        _ => unsafe { unreachable_unchecked() },
+                    },
+                    start: key.start,
+                    end: key.end,
+                };
 
-            self.expect(b':')?;
-            data.push((key, self.value()?));
+                self.expect(b':')?;
+                data.push((key, self.value()?));
 
-            Ok(())
-        })
+                Ok(())
+            },
+            |mut v| {
+                v.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
+                Value::Object(Object(v))
+            },
+        )
     }
 
     #[inline(always)]
     fn array(&mut self) -> Result<Span<Value>, Error> {
-        self.bypass().field_like(b']', Vec::new(), |data| {
-            data.push(self.value()?);
-            Ok(())
-        })
+        self.bypass().field_like(
+            b']',
+            1,
+            |data| {
+                data.push(self.value()?);
+                Ok(())
+            },
+            |v| Value::Array(v),
+        )
     }
 
     fn string(&mut self) -> Result<Span<Value>, Error> {

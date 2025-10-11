@@ -23,6 +23,7 @@ name = "parse"
 harness = false
 
 [features]
-default = []
+default = ["prealloc"]
 comment = []
+prealloc = []
 line-count = ["comment"]
