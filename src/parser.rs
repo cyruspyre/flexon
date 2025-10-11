@@ -225,25 +225,33 @@ impl<'a> Parser<'a> {
         self.index = self.index.wrapping_add(1);
 
         let start = self.index;
+        let mut flag = false;
 
-        while !self.might(de) {
+        loop {
+            let tmp = self.skip_whitespace();
+
+            if tmp == b',' {
+                self.index += 1;
+
+                if self.might(de) {
+                    if self.trailing_comma || !flag {
+                        return Err(Error::TrailingComma);
+                    }
+
+                    break;
+                }
+            } else if tmp == de {
+                break;
+            } else if flag && self.comma {
+                return Err(Error::Expected(','));
+            }
+
             handler(&mut data)?;
 
-            let sep = self.might(b',');
-            let end = self.might(de);
-
-            if sep {
-                if self.trailing_comma && end {
-                    return Err(Error::TrailingComma);
-                }
-            } else if self.comma && !end {
-                self.expect(b',')?;
-            }
-
-            if end {
-                break;
-            }
+            flag = true;
         }
+
+        self.index += 1;
 
         return Ok(Span {
             data: data.into(),
@@ -283,42 +291,82 @@ impl<'a> Parser<'a> {
     fn string(&mut self) -> Result<Span<Value>, Error> {
         self.expect(b'"')?;
 
-        let start = self.index;
+        let stamp = self.index;
+        let mut start = stamp + 1;
         let mut buf = Vec::new();
         let mut err = false;
 
         loop {
-            let tmp = match self.next() {
-                b'"' => break,
-                b'\\' => match self.next() {
-                    0 => 0,
+            let tmp = self.next();
+
+            if tmp == b'\\' {
+                buf.extend_from_slice(&self.src[start..self.index]);
+
+                start = self.index + 2;
+
+                let tmp = match self.next() {
                     b'"' => b'"',
-                    b'r' => b'\r',
-                    b'n' => b'\n',
                     b'\\' => b'\\',
-                    v => {
-                        err = true;
-                        v
+                    b'n' => b'\n',
+                    b't' => b'\t',
+                    b'r' => b'\r',
+                    b'b' => b'\x08',
+                    b'f' => b'\x0C',
+                    b'/' => b'/',
+                    b'u' => {
+                        self.index += 4;
+
+                        if self.index >= self.src.len() {
+                            err = true;
+                            continue;
+                        }
+
+                        let Ok(tmp) = u8::from_str_radix(
+                            unsafe { str::from_utf8_unchecked(&self.src[start..=self.index]) },
+                            16,
+                        ) else {
+                            err = true;
+                            continue;
+                        };
+
+                        start += 4;
+                        tmp
                     }
-                },
-                v => v,
-            };
+                    _ => {
+                        err = true;
+                        continue;
+                    }
+                };
+
+                buf.push(tmp);
+                continue;
+            }
+
+            if tmp == b'"' {
+                break;
+            }
 
             if tmp == 0 {
                 return Err(Error::Eof);
             }
 
-            buf.push(tmp)
+            // note to myself: don't use else if chains here. the generated asm jumps around
+            // quite a few time for... a reason ik but cant explain properly
+            // usually rustc is smart enough to optimize away such cases but in the
+            // above case rustc wasn't able to do it and the code was
+            // roughly `0.1 ms` slower... ig the compiler got waku waku and got distracted
         }
 
         if err {
-            self.stamp = start;
+            self.stamp = stamp;
             return Err(Error::InvalidEscapeSequnce);
         }
 
+        buf.extend_from_slice(&self.src[start..self.index]);
+
         Ok(Span {
             data: Value::String(unsafe { String::from_utf8_unchecked(buf) }),
-            start,
+            start: stamp,
             end: self.index,
         })
     }
