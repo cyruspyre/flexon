@@ -1,4 +1,4 @@
-# flexon
+# flexon ![crates.io](https://img.shields.io/crates/v/flexon.svg)
 A JSON parser with span tracking and optional comment support.
 
 ## Example
