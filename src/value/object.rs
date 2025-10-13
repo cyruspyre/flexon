@@ -1,18 +1,25 @@
 use std::fmt::Debug;
 
-use crate::{span::Span, value::Value};
+use crate::{Wrap, value::Value};
 
-pub struct Object(pub(crate) Vec<(Span<String>, Span<Value>)>);
+pub struct Object(pub(crate) Vec<(Wrap<String>, Wrap<Value>)>);
 
 impl Object {
-    pub fn get_key_value(&self, key: &str) -> Option<&(Span<String>, Span<Value>)> {
-        match self.0.binary_search_by(|v| key.cmp(&v.0.data)) {
+    pub fn get_key_value(&self, key: &str) -> Option<&(Wrap<String>, Wrap<Value>)> {
+        match self.0.binary_search_by(|v| {
+            key.cmp(
+                #[cfg(feature = "span")]
+                &v.0.data,
+                #[cfg(not(feature = "span"))]
+                &v.0,
+            )
+        }) {
             Ok(v) => Some(&self.0[v]),
             _ => None,
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Span<Value>> {
+    pub fn get(&self, key: &str) -> Option<&Wrap<Value>> {
         self.get_key_value(key).map(|v| &v.1)
     }
 }

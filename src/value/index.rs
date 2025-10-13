@@ -1,13 +1,13 @@
 use std::ops;
 
-use crate::{misc::Sealed, span::Span, value::Value};
+use crate::{Wrap, misc::Sealed, value::Value};
 
 pub trait Index<I>: Sealed {
-    fn get(&self, index: I) -> Option<&Span<Value>>;
+    fn get(&self, index: I) -> Option<&Wrap<Value>>;
 }
 
 impl Index<usize> for Value {
-    fn get(&self, index: usize) -> Option<&Span<Value>> {
+    fn get(&self, index: usize) -> Option<&Wrap<Value>> {
         match self {
             Value::Array(v) => v.get(index),
             _ => None,
@@ -16,7 +16,7 @@ impl Index<usize> for Value {
 }
 
 impl Index<&str> for Value {
-    fn get(&self, index: &str) -> Option<&Span<Value>> {
+    fn get(&self, index: &str) -> Option<&Wrap<Value>> {
         match self {
             Value::Object(v) => v.get(index),
             _ => None,
@@ -38,7 +38,7 @@ fn name(val: &Value) -> &str {
 }
 
 impl ops::Index<usize> for Value {
-    type Output = Span<Value>;
+    type Output = Wrap<Value>;
 
     fn index(&self, index: usize) -> &Self::Output {
         let Value::Array(arr) = self else {
@@ -56,7 +56,7 @@ impl ops::Index<usize> for Value {
 }
 
 impl ops::Index<&str> for Value {
-    type Output = Span<Value>;
+    type Output = Wrap<Value>;
 
     fn index(&self, index: &str) -> &Self::Output {
         let Value::Object(obj) = self else {

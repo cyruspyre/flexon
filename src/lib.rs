@@ -1,26 +1,35 @@
-pub use crate::{error::Error, parser::Parser, span::Span};
-#[cfg(all(feature = "comment", not(feature = "line-count")))]
+pub use crate::{error::Error, parser::Parser, value::Value};
+
+#[cfg(all(feature = "comment", feature = "span"))]
 pub use find_comment::FindComment;
 
-use crate::value::Value;
+#[cfg(feature = "span")]
+pub use crate::span::Span;
 
 #[cfg(feature = "line-count")]
 mod metadata;
 
-#[cfg(feature = "comment")]
+#[cfg(all(feature = "comment", feature = "span"))]
 mod find_comment;
+
+#[cfg(feature = "span")]
+mod span;
 
 mod error;
 mod misc;
 mod parser;
-mod span;
 pub mod value;
+
+#[cfg(feature = "span")]
+type Wrap<T> = Span<T>;
+#[cfg(not(feature = "span"))]
+type Wrap<T> = T;
 
 pub fn parse_with(
     src: &str,
     comma: bool,
     trailing_comma: bool,
-) -> Result<Span<Value>, Span<Error>> {
+) -> Result<Wrap<Value>, Wrap<Error>> {
     Parser::new(src, comma, trailing_comma).parse().map(|v| {
         #[cfg(feature = "comment")]
         return v.0;
@@ -30,6 +39,6 @@ pub fn parse_with(
     })
 }
 
-pub fn parse(src: &str) -> Result<Span<Value>, Span<Error>> {
+pub fn parse(src: &str) -> Result<Wrap<Value>, Wrap<Error>> {
     parse_with(src, true, false)
 }

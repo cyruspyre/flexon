@@ -24,9 +24,10 @@ harness = false
 
 [features]
 default = ["prealloc"]
+span = []
 comment = []
 prealloc = []
-line-count = ["comment"]
+line-count = ["comment", "span"]
 
 [dependencies]
 fast-float2 = "0.2.3"

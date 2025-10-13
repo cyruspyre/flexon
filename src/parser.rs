@@ -1,10 +1,13 @@
 #[cfg(feature = "line-count")]
 use crate::metadata::Metadata;
 
+#[cfg(feature = "span")]
+use crate::Span;
+
 use crate::{
+    Wrap,
     error::Error,
     misc::Bypass,
-    span::Span,
     value::{Number, Object, Value},
 };
 
@@ -21,7 +24,7 @@ pub struct Parser<'a> {
     #[cfg(feature = "line-count")]
     metadata: Metadata<'a>,
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    cmnts: Vec<Span<(&'a str, bool)>>,
+    cmnts: Vec<Wrap<(&'a str, bool)>>,
 }
 
 impl<'a> Parser<'a> {
@@ -45,7 +48,7 @@ impl<'a> Parser<'a> {
     }
 
     #[inline(always)]
-    fn _parse<T>(mut self, handler: impl Fn(Span<Value>, Self) -> T) -> Result<T, Span<Error>> {
+    fn _parse<T>(mut self, handler: impl Fn(Wrap<Value>, Self) -> T) -> Result<T, Wrap<Error>> {
         let data = match self.value() {
             Ok(v) if self.skip_whitespace() == 0 => return Ok(handler(v, self)),
             Err(v) => v,
@@ -55,28 +58,33 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Err(Span {
-            data,
-            start: match self.stamp {
-                0 => self.index,
-                v => v,
+        Err(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start: match self.stamp {
+                    0 => self.index,
+                    v => v,
+                },
+                end: self.index,
             },
-            end: self.index,
-        })
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 
     #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
-    pub fn parse(self) -> Result<Span<Value>, Span<Error>> {
+    pub fn parse(self) -> Result<Wrap<Value>, Wrap<Error>> {
         self._parse(|v, _| v)
     }
 
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    pub fn parse(self) -> Result<(Span<Value>, Vec<Span<(&'a str, bool)>>), Span<Error>> {
+    pub fn parse(self) -> Result<(Wrap<Value>, Vec<Wrap<(&'a str, bool)>>), Wrap<Error>> {
         self._parse(|a, b| (a, b.cmnts))
     }
 
     #[cfg(feature = "line-count")]
-    pub fn parse(self) -> Result<(Span<Value>, Metadata<'a>), Span<Error>> {
+    pub fn parse(self) -> Result<(Wrap<Value>, Metadata<'a>), Wrap<Error>> {
         self._parse(|a, b| (a, b.metadata))
     }
 
@@ -130,11 +138,14 @@ impl<'a> Parser<'a> {
                 };
 
                 let start = self.index - count;
+                let data = (
+                    unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) },
+                    flag == 2,
+                );
+
+                #[cfg(feature = "span")]
                 let data = Span {
-                    data: (
-                        unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) },
-                        flag == 2,
-                    ),
+                    data,
                     start: start - 2,
                     end: self.index,
                 };
@@ -191,7 +202,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn value(&mut self) -> Result<Span<Value>, Error> {
+    fn value(&mut self) -> Result<Wrap<Value>, Error> {
         'tmp: {
             return match self.skip_whitespace() {
                 0 => Err(Error::Eof),
@@ -225,11 +236,16 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(Span {
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
             data,
-            start,
-            end: self.index,
-        })
+        )
     }
 
     #[inline(always)]
@@ -239,9 +255,10 @@ impl<'a> Parser<'a> {
         typ: usize,
         mut handler: impl FnMut() -> Result<T, Error>,
         mut wrap: impl FnMut(Vec<T>) -> Value,
-    ) -> Result<Span<Value>, Error> {
+    ) -> Result<Wrap<Value>, Error> {
         self.index = self.index.wrapping_add(1);
 
+        #[cfg(feature = "span")]
         let start = self.index;
         let mut flag = false;
 
@@ -278,20 +295,27 @@ impl<'a> Parser<'a> {
         #[cfg(feature = "prealloc")]
         (self.prev_sizes[typ] = data.len());
 
-        return Ok(Span {
-            data: wrap(data),
-            start,
-            end: self.index,
-        });
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data: wrap(data),
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            wrap(data),
+        )
     }
 
     #[inline(always)]
-    fn object(&mut self) -> Result<Span<Value>, Error> {
+    fn object(&mut self) -> Result<Wrap<Value>, Error> {
         self.bypass().field_like(
             b'}',
             0,
             || {
                 let key = self.string()?;
+
+                #[cfg(feature = "span")]
                 let key = Span {
                     data: match key.data {
                         Value::String(v) => v,
@@ -301,24 +325,35 @@ impl<'a> Parser<'a> {
                     end: key.end,
                 };
 
+                #[cfg(not(feature = "span"))]
+                let Value::String(key) = key else {
+                    unsafe { unreachable_unchecked() }
+                };
+
                 self.expect(b':')?;
 
                 Ok((key, self.value()?))
             },
             |mut v| {
-                v.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
+                v.sort_unstable_by(|a, b| {
+                    #[cfg(feature = "span")]
+                    return a.0.data.cmp(&b.0.data);
+
+                    #[cfg(not(feature = "span"))]
+                    a.0.cmp(&b.0)
+                });
                 Value::Object(Object(v))
             },
         )
     }
 
     #[inline(always)]
-    fn array(&mut self) -> Result<Span<Value>, Error> {
+    fn array(&mut self) -> Result<Wrap<Value>, Error> {
         self.bypass()
             .field_like(b']', 1, || Ok(self.value()?), |v| Value::Array(v))
     }
 
-    fn string(&mut self) -> Result<Span<Value>, Error> {
+    fn string(&mut self) -> Result<Wrap<Value>, Error> {
         self.expect(b'"')?;
 
         let stamp = self.index;
@@ -403,15 +438,22 @@ impl<'a> Parser<'a> {
 
         buf.extend_from_slice(&self.src[start..self.index]);
 
-        Ok(Span {
-            data: Value::String(unsafe { String::from_utf8_unchecked(buf) }),
-            start: stamp,
-            end: self.index,
-        })
+        let data = Value::String(unsafe { String::from_utf8_unchecked(buf) });
+
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start: stamp,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 
     #[inline(always)]
-    fn number(&mut self) -> Result<Span<Value>, Error> {
+    fn number(&mut self) -> Result<Wrap<Value>, Error> {
         let mut int = true;
         let start = self.index.wrapping_add(1);
         let pos = !self.might(b'-');
@@ -457,11 +499,17 @@ impl<'a> Parser<'a> {
         } else {
             return Err(Error::NumberOverflow);
         };
+        let data = Value::Number(data);
 
-        return Ok(Span {
-            data: Value::Number(data),
-            start,
-            end: self.index,
-        });
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 }

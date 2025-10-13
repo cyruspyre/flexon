@@ -4,21 +4,25 @@ mod object;
 
 use std::fmt::Debug;
 
-use crate::span::Span;
-
 pub use index::Index;
 pub use number::Number;
 pub use object::Object;
 
+use crate::Wrap;
+
+#[cfg(feature = "span")]
+use crate::Span;
+
 pub enum Value {
     Null,
-    Array(Vec<Span<Value>>),
+    Array(Vec<Wrap<Value>>),
     Boolean(bool),
     Number(Number),
     String(String),
     Object(Object),
 }
 
+#[cfg(feature = "span")]
 impl Span<Value> {
     pub fn as_null(&self) -> Option<Span<()>> {
         match self.data {
@@ -147,7 +151,7 @@ impl Value {
         }
     }
 
-    pub fn as_array(&self) -> Option<&[Span<Value>]> {
+    pub fn as_array(&self) -> Option<&[Wrap<Value>]> {
         match self {
             Value::Array(v) => Some(v),
             _ => None,
@@ -201,18 +205,5 @@ impl Debug for Value {
             Self::String(v) => v.fmt(f),
             Self::Object(v) => v.fmt(f),
         }
-    }
-}
-
-impl From<Vec<Span<Value>>> for Value {
-    fn from(value: Vec<Span<Value>>) -> Self {
-        Self::Array(value)
-    }
-}
-
-impl From<Vec<(Span<String>, Span<Value>)>> for Value {
-    fn from(mut value: Vec<(Span<std::string::String>, Span<Value>)>) -> Self {
-        value.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
-        Self::Object(Object(value))
     }
 }

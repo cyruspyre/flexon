@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+#[cfg(feature = "span")]
 use crate::span::Span;
 
 #[derive(Clone, Copy)]
@@ -9,6 +10,7 @@ pub enum Number {
     Float(f64),
 }
 
+#[cfg(feature = "span")]
 impl Span<Number> {
     pub fn as_u64(&self) -> Option<Span<u64>> {
         match self.data {
