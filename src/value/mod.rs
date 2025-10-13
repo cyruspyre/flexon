@@ -8,22 +8,35 @@ pub use index::Index;
 pub use number::Number;
 pub use object::Object;
 
-use crate::Wrap;
+use crate::wrap;
 
 #[cfg(feature = "span")]
 use crate::Span;
 
+/// Represents a JSON value.
 pub enum Value {
+    /// Represents `null` in JSON.
     Null,
-    Array(Vec<Wrap<Value>>),
+
+    /// Represents a JSON array.
+    Array(Vec<wrap!(Value)>),
+
+    /// Represents a JSON boolean.
     Boolean(bool),
+
+    /// Represents a JSON number.
     Number(Number),
+
+    /// Represents a JSON string.
     String(String),
+
+    /// Represents a JSON object.
     Object(Object),
 }
 
 #[cfg(feature = "span")]
 impl Span<Value> {
+    /// Returns `()` if the value is `Null`, `None` otherwise.
     pub fn as_null(&self) -> Option<Span<()>> {
         match self.data {
             Value::Null => Some(Span {
@@ -35,6 +48,7 @@ impl Span<Value> {
         }
     }
 
+    /// Returns `&str` if the value is a `String`, `None` otherwise.
     pub fn as_str(&self) -> Option<Span<&str>> {
         match &self.data {
             Value::String(v) => Some(Span {
@@ -46,6 +60,7 @@ impl Span<Value> {
         }
     }
 
+    /// Returns `bool` if the value is a `Boolean`, `None` otherwise.
     pub fn as_bool(&self) -> Option<Span<bool>> {
         match self.data {
             Value::Boolean(data) => Some(Span {
@@ -57,18 +72,22 @@ impl Span<Value> {
         }
     }
 
+    /// Returns `u64` if the value is a positive integer, `None` otherwise.
     pub fn as_u64(&self) -> Option<Span<u64>> {
         self.as_number().and_then(|v| v.as_u64())
     }
 
+    /// Returns `i64` if the value is a negative integer, `None` otherwise.
     pub fn as_i64(&self) -> Option<Span<i64>> {
         self.as_number().and_then(|v| v.as_i64())
     }
 
+    /// Returns `f64` if the value is a float, `None` otherwise.
     pub fn as_f64(&self) -> Option<Span<f64>> {
         self.as_number().and_then(|v| v.as_f64())
     }
 
+    /// Returns `Number` if the value is a `Number`, `None` otherwise.
     pub fn as_number(&self) -> Option<Span<Number>> {
         match self.data {
             Value::Number(data) => Some(Span {
@@ -80,6 +99,7 @@ impl Span<Value> {
         }
     }
 
+    /// Returns a reference to the `Object` if the value is an `Object`, `None` otherwise.
     pub fn as_object(&self) -> Option<Span<&Object>> {
         match &self.data {
             Value::Object(data) => Some(Span {
@@ -91,6 +111,7 @@ impl Span<Value> {
         }
     }
 
+    /// Returns a slice if the value is an `Array`, `None` otherwise.
     pub fn as_array(&self) -> Option<Span<&[Span<Value>]>> {
         match &self.data {
             Value::Array(data) => Some(Span {
@@ -104,6 +125,7 @@ impl Span<Value> {
 }
 
 impl Value {
+    /// Returns `()` if the value is `Null`, `None` otherwise.
     pub fn as_null(&self) -> Option<()> {
         match self {
             Value::Null => Some(()),
@@ -111,6 +133,7 @@ impl Value {
         }
     }
 
+    /// Returns `&str` if the value is a `String`, `None` otherwise.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(v) => Some(v),
@@ -118,6 +141,7 @@ impl Value {
         }
     }
 
+    /// Returns `bool` if the value is a `Boolean`, `None` otherwise.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Boolean(v) => Some(*v),
@@ -125,25 +149,30 @@ impl Value {
         }
     }
 
+    /// Returns `u64` if the value is a positive integer, `None` otherwise.
     pub fn as_u64(&self) -> Option<u64> {
         self.as_number().and_then(|v| v.as_u64())
     }
 
+    /// Returns `i64` if the value is a negative integer, `None` otherwise.
     pub fn as_i64(&self) -> Option<i64> {
         self.as_number().and_then(|v| v.as_i64())
     }
 
+    /// Returns `f64` if the value is a float, `None` otherwise.
     pub fn as_f64(&self) -> Option<f64> {
         self.as_number().and_then(|v| v.as_f64())
     }
 
-    pub fn as_number(&self) -> Option<&Number> {
+    /// Returns `Number` if the value is a `Number`, `None` otherwise.
+    pub fn as_number(&self) -> Option<Number> {
         match self {
-            Value::Number(v) => Some(v),
+            Value::Number(v) => Some(*v),
             _ => None,
         }
     }
 
+    /// Returns a reference to the `Object` if the value is an `Object`, `None` otherwise.
     pub fn as_object(&self) -> Option<&Object> {
         match self {
             Value::Object(v) => Some(v),
@@ -151,45 +180,55 @@ impl Value {
         }
     }
 
-    pub fn as_array(&self) -> Option<&[Wrap<Value>]> {
+    /// Returns a slice if the value is an `Array`, `None` otherwise.
+    pub fn as_array(&self) -> Option<&[wrap!(Value)]> {
         match self {
             Value::Array(v) => Some(v),
             _ => None,
         }
     }
 
+    /// Returns `true` if the value is `Null`.
     pub fn is_null(&self) -> bool {
         self.as_null().is_some()
     }
 
+    /// Returns `true` if the value is a `String`.
     pub fn is_str(&self) -> bool {
         self.as_str().is_some()
     }
 
+    /// Returns `true` if the value is a `Boolean`.
     pub fn is_bool(&self) -> bool {
         self.as_bool().is_some()
     }
 
+    /// Returns `true` if the value is a positive integer.
     pub fn is_u64(&self) -> bool {
         self.as_u64().is_some()
     }
 
+    /// Returns `true` if the value is a negative integer.
     pub fn is_i64(&self) -> bool {
         self.as_i64().is_some()
     }
 
+    /// Returns `true` if the value is a float.
     pub fn is_f64(&self) -> bool {
         self.as_f64().is_some()
     }
 
+    /// Returns `true` if the value is a `Number`.
     pub fn is_number(&self) -> bool {
         self.as_number().is_some()
     }
 
+    /// Returns `true` if the value is an `Object`.
     pub fn is_object(&self) -> bool {
         self.as_object().is_some()
     }
 
+    /// Returns `true` if the value is an `Array`.
     pub fn is_array(&self) -> bool {
         self.as_array().is_some()
     }

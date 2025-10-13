@@ -9,10 +9,12 @@ use crate::{
     error::Error,
     misc::Bypass,
     value::{Number, Object, Value},
+    wrap,
 };
 
 use std::hint::unreachable_unchecked;
 
+/// JSON parser for... *JSON?*
 pub struct Parser<'a> {
     src: &'a [u8],
     stamp: usize,
@@ -28,6 +30,13 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    /// Creates a new JSON `Parser` with the given options.
+    ///
+    /// # Arguments
+    ///
+    /// - `src`: The JSON source to parse.
+    /// - `comma`: Whether to require commas while parsing.
+    /// - `trailing_comma`: Whether trailing commas are allowed (has no effect when commas are optional).
     pub fn new(src: &'a str, comma: bool, trailing_comma: bool) -> Self {
         Self {
             comma,
@@ -73,18 +82,21 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Parses the JSON source into a single value.
     #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
-    pub fn parse(self) -> Result<Wrap<Value>, Wrap<Error>> {
+    pub fn parse(self) -> Result<wrap!(Value), wrap!(Error)> {
         self._parse(|v, _| v)
     }
 
+    /// Parses the JSON source and returns the value along with any comments.
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    pub fn parse(self) -> Result<(Wrap<Value>, Vec<Wrap<(&'a str, bool)>>), Wrap<Error>> {
+    pub fn parse(self) -> Result<(wrap!(Value), Vec<wrap!((&'a str, bool))>), wrap!(Error)> {
         self._parse(|a, b| (a, b.cmnts))
     }
 
+    /// Parses the JSON source and returns the value along with its metadata.
     #[cfg(feature = "line-count")]
-    pub fn parse(self) -> Result<(Wrap<Value>, Metadata<'a>), Wrap<Error>> {
+    pub fn parse(self) -> Result<(wrap!(Value), Metadata<'a>), wrap!(Error)> {
         self._parse(|a, b| (a, b.metadata))
     }
 

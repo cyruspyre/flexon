@@ -1,24 +1,24 @@
-/// Represents the type of error that occurred while parsing
+/// Represents the type of error that occurred while parsing.
 #[derive(Debug)]
 pub enum Error {
-    /// EOF while parsing
+    /// EOF while parsing.
     Eof,
-    /// Expected the given character but found something else
+    /// Expected the given character but found something else.
     Expected(char),
-    /// Found additional characters when expecting end of input
+    /// Found additional characters when expecting end of input.
     ExpectedEof,
-    /// Unexpected token while parsing
+    /// Unexpected token while parsing.
     UnexpectedToken,
-    /// Invalid escape sequence in string
+    /// Invalid escape sequence in string.
     InvalidEscapeSequnce,
-    /// Comma after the last value of an array or an object
+    /// Comma after the last value of an array or an object.
     TrailingComma,
-    /// Number starting with a decimal point
+    /// Number starting with a decimal point.
     LeadingDecimal,
-    /// Number ending with a decimal point
+    /// Number ending with a decimal point.
     TrailingDecimal,
-    /// Negative sign of a number not followed by a digit
+    /// Negative sign of a number not followed by a digit.
     MissingDigitAfterNegative,
-    /// Number is bigger than it can represent
+    /// Number is bigger than it can represent.
     NumberOverflow,
 }

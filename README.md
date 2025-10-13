@@ -60,7 +60,7 @@ assert!(comments.find_comment_by_line(7).is_some());
 
 `prealloc` (default): Pre-allocate memory for array/object when parsing based on the length of previously parsed array/object. Can improve performance at the cost of potentially increased/reduced memory usage. Works particularly well when the JSON has a relatively uniform and repetitive structure.
 
-`span`: Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase by roughly 33%.
+`span`: Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%.
 
 ## Performance
 This was created solely for parsing JSON with span support and comments, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
