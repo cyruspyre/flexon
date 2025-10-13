@@ -96,3 +96,115 @@ impl Debug for Number {
         }
     }
 }
+
+#[cfg(feature = "serde-json")]
+impl Into<serde_json::Number> for Number {
+    fn into(self) -> serde_json::Number {
+        match self {
+            Number::Unsigned(value) => value.into(),
+            Number::Signed(value) => value.into(),
+            Number::Float(value) => {
+                serde_json::Number::from_f64(value).expect("value should be finite")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serde-json")]
+#[cfg(test)]
+mod serde_json_tests {
+    use super::*;
+
+    #[test]
+    fn unsigned_serde_json_number() {
+        let num = Number::Unsigned(42);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_u64(), Some(42));
+        assert!(json_num.is_u64());
+    }
+
+    #[test]
+    fn unsigned_max_serde_json_number() {
+        let num = Number::Unsigned(u64::MAX);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_u64(), Some(u64::MAX));
+        assert!(json_num.is_u64());
+    }
+
+    #[test]
+    fn signed_positive_serde_json_number() {
+        let num = Number::Signed(42);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_i64(), Some(42));
+        assert!(json_num.is_i64());
+    }
+
+    #[test]
+    fn signed_negative_serde_json_number() {
+        let num = Number::Signed(-42);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_i64(), Some(-42));
+        assert!(json_num.is_i64());
+    }
+
+    #[test]
+    fn signed_min_serde_json_number() {
+        let num = Number::Signed(i64::MIN);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_i64(), Some(i64::MIN));
+        assert!(json_num.is_i64());
+    }
+
+    #[test]
+    fn signed_max_serde_json_number() {
+        let num = Number::Signed(i64::MAX);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_i64(), Some(i64::MAX));
+        assert!(json_num.is_i64());
+    }
+
+    #[test]
+    fn float_positive_serde_json_number() {
+        let num = Number::Float(3.14);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_f64(), Some(3.14));
+        assert!(json_num.is_f64());
+    }
+
+    #[test]
+    fn float_negative_serde_json_number() {
+        let num = Number::Float(-3.14);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_f64(), Some(-3.14));
+        assert!(json_num.is_f64());
+    }
+
+    #[test]
+    fn float_zero_serde_json_number() {
+        let num = Number::Float(0.0);
+        let json_num: serde_json::Number = num.into();
+        assert_eq!(json_num.as_f64(), Some(0.0));
+        assert!(json_num.is_f64());
+    }
+
+    #[test]
+    #[should_panic(expected = "value should be finite")]
+    fn float_nan_panics() {
+        let num = Number::Float(f64::NAN);
+        let _: serde_json::Number = num.into();
+    }
+
+    #[test]
+    #[should_panic(expected = "value should be finite")]
+    fn float_infinity_panics() {
+        let num = Number::Float(f64::INFINITY);
+        let _: serde_json::Number = num.into();
+    }
+
+    #[test]
+    #[should_panic(expected = "value should be finite")]
+    fn float_neg_infinity_panics() {
+        let num = Number::Float(f64::NEG_INFINITY);
+        let _: serde_json::Number = num.into();
+    }
+}

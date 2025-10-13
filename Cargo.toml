@@ -27,3 +27,7 @@ default = ["prealloc"]
 comment = []
 prealloc = []
 line-count = ["comment"]
+serde-json = ["serde_json"]
+
+[dependencies]
+serde_json = { version = "1.0.145", optional = true }
