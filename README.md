@@ -60,18 +60,25 @@ assert!(comments.find_comment_by_line(7).is_some());
 
 `prealloc` (default): Pre-allocate memory for array/object when parsing based on the length of previously parsed array/object. Can improve performance at the cost of potentially increased/reduced memory usage. Works particularly well when the JSON has a relatively uniform and repetitive structure.
 
+`span`: Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase by roughly 33%.
+
 ## Performance
-This was created solely for parsing JSON with span support, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
+This was created solely for parsing JSON with span support and comments, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
 ```
 serde-json:
-  canada        13.92 ms  154.26 MiB/s
-  twitter        2.41 ms  249.42 MiB/s
-  citm_catalog   4.25 ms  387.38 MiB/s
+  canada        14.36 ms  149.42 MiB/s
+  twitter        2.46 ms  244.20 MiB/s
+  citm_catalog   4.46 ms  369.00 MiB/s
 
 flexon:
-  canada         9.70 ms  221.36 MiB/s
-  twitter        2.91 ms  207.16 MiB/s
-  citm_catalog   4.32 ms  381.06 MiB/s
+  canada         9.87 ms  217.50 MiB/s
+  twitter        2.75 ms  218.69 MiB/s
+  citm_catalog   4.24 ms  388.56 MiB/s
+
+flexon (without span):
+  canada         9.31 ms  230.50 MiB/s
+  twitter        2.60 ms  230.99 MiB/s
+  citm_catalog   4.16 ms  396.08 MiB/s
 ```
 Even though it can parse standard, strict JSON, you shouldn’t use it for that unless you need to parse JSON with comments or span support. Don’t torture yourself and just use one of the faster crates mentioned earlier. Fyi, this crate is faster than others that serve a somewhat similar purpose. *Source?* **Trust me, bro.**
 
