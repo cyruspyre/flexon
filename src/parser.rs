@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
                 b'"' => self.string(),
                 b'{' => self.object(),
                 b'[' => self.array(),
-                v if v == b'-' || v == b'.' || v.is_ascii_digit() => self.number(),
+                v if v == b'-' || v.is_ascii_digit() || v == b'.' => self.number(),
                 _ => break 'tmp,
             };
         };
@@ -237,7 +237,7 @@ impl<'a> Parser<'a> {
         &mut self,
         de: u8,
         typ: usize,
-        mut handler: impl FnMut(&mut Vec<T>) -> Result<(), Error>,
+        mut handler: impl FnMut() -> Result<T, Error>,
         mut wrap: impl FnMut(Vec<T>) -> Value,
     ) -> Result<Span<Value>, Error> {
         self.index = self.index.wrapping_add(1);
@@ -269,7 +269,7 @@ impl<'a> Parser<'a> {
                 return Err(Error::Expected(','));
             }
 
-            handler(&mut data)?;
+            data.push(handler()?);
 
             flag = true;
         }
@@ -290,7 +290,7 @@ impl<'a> Parser<'a> {
         self.bypass().field_like(
             b'}',
             0,
-            |data| {
+            || {
                 let key = self.string()?;
                 let key = Span {
                     data: match key.data {
@@ -302,9 +302,8 @@ impl<'a> Parser<'a> {
                 };
 
                 self.expect(b':')?;
-                data.push((key, self.value()?));
 
-                Ok(())
+                Ok((key, self.value()?))
             },
             |mut v| {
                 v.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
@@ -315,15 +314,8 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     fn array(&mut self) -> Result<Span<Value>, Error> {
-        self.bypass().field_like(
-            b']',
-            1,
-            |data| {
-                data.push(self.value()?);
-                Ok(())
-            },
-            |v| Value::Array(v),
-        )
+        self.bypass()
+            .field_like(b']', 1, || Ok(self.value()?), |v| Value::Array(v))
     }
 
     fn string(&mut self) -> Result<Span<Value>, Error> {
@@ -335,7 +327,24 @@ impl<'a> Parser<'a> {
         let mut err = false;
 
         loop {
-            let tmp = self.next();
+            self.index += 1;
+
+            let tmp = &self.src[self.index..];
+            #[cfg(feature = "line-count")]
+            let tmp = memchr::memchr3(b'"', b'\\', b'\n', tmp);
+            #[cfg(not(feature = "line-count"))]
+            let tmp = memchr::memchr2(b'"', b'\\', tmp);
+
+            self.index += match tmp {
+                Some(v) => v,
+                _ => return Err(Error::Eof),
+            };
+
+            let tmp = self.src[self.index];
+
+            if tmp == b'"' {
+                break;
+            }
 
             if tmp == b'\\' {
                 buf.extend_from_slice(&self.src[start..self.index]);
@@ -380,14 +389,6 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if tmp == b'"' {
-                break;
-            }
-
-            if tmp == 0 {
-                return Err(Error::Eof);
-            }
-
             // note to myself: don't use else if chains here. the generated asm jumps around
             // quite a few time for... a reason ik but cant explain properly
             // usually rustc is smart enough to optimize away such cases but in the
@@ -411,19 +412,20 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     fn number(&mut self) -> Result<Span<Value>, Error> {
-        let mut dot = false;
+        let mut int = true;
         let start = self.index.wrapping_add(1);
-        let neg = self.might(b'-');
+        let pos = !self.might(b'-');
+        let tmp = self.index.wrapping_add(1);
 
         loop {
             let tmp = self.next();
 
             if !tmp.is_ascii_digit() {
-                if dot || tmp != b'.' {
+                if !int || tmp != b'.' {
                     break;
                 }
 
-                dot = true
+                int = false
             }
         }
 
@@ -441,15 +443,18 @@ impl<'a> Parser<'a> {
             return Err(tmp);
         }
 
-        let data = unsafe { str::from_utf8_unchecked(&self.src[start..=self.index]) };
-        let data = if dot && let Ok(v) = data.parse() {
+        let data = unsafe { str::from_utf8_unchecked(&self.src[tmp..=self.index]) };
+        let data = if int
+            && let Ok(v) = data.parse::<u64>()
+            && (pos || v <= i64::MIN as _)
+        {
+            match pos {
+                true => Number::Unsigned(v),
+                _ => Number::Signed(v.wrapping_neg() as _),
+            }
+        } else if let Ok(v) = fast_float2::parse(&self.src[start..=self.index]) {
             Number::Float(v)
-        } else if neg && let Ok(v) = data.parse() {
-            Number::Signed(v)
-        } else if let Ok(v) = data.parse() {
-            Number::Unsigned(v)
         } else {
-            self.stamp = start;
             return Err(Error::NumberOverflow);
         };
 

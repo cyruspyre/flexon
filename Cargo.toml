@@ -27,3 +27,7 @@ default = ["prealloc"]
 comment = []
 prealloc = []
 line-count = ["comment"]
+
+[dependencies]
+fast-float2 = "0.2.3"
+memchr = "2.7.6"
