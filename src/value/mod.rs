@@ -249,12 +249,14 @@ impl Debug for Value {
     }
 }
 
+#[cfg(feature = "span")]
 impl From<Vec<Span<Value>>> for Value {
     fn from(value: Vec<Span<Value>>) -> Self {
         Self::Array(value)
     }
 }
 
+#[cfg(feature = "span")]
 impl From<Vec<(Span<String>, Span<Value>)>> for Value {
     fn from(mut value: Vec<(Span<std::string::String>, Span<Value>)>) -> Self {
         value.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
