@@ -8,7 +8,7 @@
 //! use flexon::parse;
 //!
 //! let src = r#"{"blah": "was it really necessary?"}"#;
-//! let val = parse(src).unwrap()["blah"];
+//! let val = &parse(src).unwrap()["blah"];
 //!
 //! println!("{val:#?} at {}..={}", val.start(), val.end());
 //! ```
@@ -94,7 +94,7 @@ pub(crate) use wrap;
 /// ```rust
 /// use flexon::parse_with;
 ///
-/// let src = r#"{"numbers": [1, 2,]}"#;
+/// let src = r#"{"numbers": [1, 2]}"#;
 /// let value = parse_with(src, true, true).unwrap();
 /// ```
 pub fn parse_with(
