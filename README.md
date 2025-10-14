@@ -62,6 +62,8 @@ assert!(comments.find_comment_by_line(7).is_some());
 
 `span`: Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%.
 
+`serde-json`: Implements `Into<serde_json::Value>` for `flexon::Value`.
+
 ## Performance
 This was created solely for parsing JSON with span support and comments, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
 ```

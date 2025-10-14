@@ -1,3 +1,6 @@
+#[cfg(feature = "serde-json")]
+mod serde_json;
+
 mod index;
 mod number;
 mod object;

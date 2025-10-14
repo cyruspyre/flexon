@@ -8,7 +8,7 @@
 //! use flexon::parse;
 //!
 //! let src = r#"{"blah": "was it really necessary?"}"#;
-//! let val = parse(src).unwrap()["blah"];
+//! let val = &parse(src).unwrap()["blah"];
 //!
 //! println!("{val:#?} at {}..={}", val.start(), val.end());
 //! ```
