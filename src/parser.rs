@@ -1,3 +1,5 @@
+use memchr::memchr2;
+
 #[cfg(feature = "line-count")]
 use crate::metadata::Metadata;
 
@@ -123,74 +125,42 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_whitespace(&mut self) -> u8 {
+        const WHITESPACE: u8 = 1;
+        const OTHER: u8 = 2;
+        const EOF: u8 = 255;
+
         #[cfg(feature = "comment")]
-        let mut count = 0;
-        #[cfg(feature = "comment")]
-        let mut flag = 0;
+        const COMMENT: u8 = 3;
+
+        const LOOKUP: [u8; 256] = const {
+            let mut tmp = [OTHER; 256];
+
+            tmp[0] = EOF;
+            tmp[' ' as usize] = WHITESPACE;
+            tmp['\t' as usize] = WHITESPACE;
+            tmp['\n' as usize] = WHITESPACE;
+            tmp['\r' as usize] = WHITESPACE;
+            tmp['\x0C' as usize] = WHITESPACE;
+
+            #[cfg(feature = "comment")]
+            (tmp['/' as usize] = COMMENT);
+
+            tmp
+        };
 
         loop {
             let tmp = self.next();
 
-            if tmp == 0 {
-                return 0;
-            }
+            match LOOKUP[tmp as usize] {
+                OTHER => {
+                    self.index = self.index.wrapping_sub(1);
 
-            #[cfg(feature = "comment")]
-            if flag > 0 {
-                let tmp = if flag == 1 && tmp == b'\n' {
-                    -1
-                } else if flag == 2
-                    && tmp == b'*'
-                    && *self.src.get(self.index + 1).unwrap_or(&0) == b'/'
-                {
-                    1
-                } else {
-                    count += 1;
-                    continue;
-                };
-
-                let start = self.index - count;
-                let data = (
-                    unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) },
-                    flag == 2,
-                );
-
-                #[cfg(feature = "span")]
-                let data = Span {
-                    data,
-                    start: start - 2,
-                    end: self.index,
-                };
-
-                self.index = self.index.wrapping_add_signed(tmp);
-
-                #[cfg(feature = "line-count")]
-                self.metadata.cmnts.push(data);
-
-                #[cfg(all(feature = "comment", not(feature = "line-count")))]
-                self.cmnts.push(data);
-
-                flag = 0;
-                count = 0;
-            } else if tmp == b'/' {
-                let tmp = self.src[self.index + 1];
-
-                if tmp == b'/' {
-                    flag = 1
-                } else if tmp == b'*' {
-                    flag = 2
-                } else {
-                    continue;
+                    return tmp;
                 }
-
-                self.index += 1;
-                continue;
-            }
-
-            if !tmp.is_ascii_whitespace() {
-                self.index = self.index.wrapping_sub(1);
-
-                return tmp;
+                WHITESPACE => continue,
+                #[cfg(feature = "comment")]
+                COMMENT => self.comment(),
+                _ => return 0,
             }
         }
     }
@@ -212,6 +182,71 @@ impl<'a> Parser<'a> {
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "comment")]
+    #[inline(always)]
+    fn comment(&mut self) {
+        let Some(v) = self.src.get(self.index + 1) else {
+            return;
+        };
+        let start = self.index;
+        let mut multi = true;
+
+        match v {
+            b'/' => {
+                self.index += match memchr::memchr(b'\n', &self.src[self.index + 1..]) {
+                    Some(v) => v,
+                    _ => return self.index = self.src.len() - 1,
+                };
+
+                multi = false;
+                #[cfg(feature = "line-count")]
+                self.metadata.lines.push(self.index + 1);
+            }
+            b'*' => loop {
+                #[cfg(feature = "line-count")]
+                let tmp = memchr2(b'\n', b'/', &self.src[self.index + 1..]);
+                #[cfg(not(feature = "line-count"))]
+                let tmp = memchr::memchr(b'/', &self.src[self.index + 1..]);
+
+                self.index += match tmp {
+                    Some(v) => v,
+                    _ => return self.index = self.src.len() - 1,
+                };
+
+                if self.src[self.index] == b'*' {
+                    break;
+                }
+
+                self.index += 1;
+
+                #[cfg(feature = "line-count")]
+                if self.src[self.index] == b'\n' {
+                    self.metadata.lines.push(self.index);
+                }
+            },
+            _ => return,
+        }
+
+        self.index += 1;
+
+        let data = (
+            unsafe { str::from_utf8_unchecked(&self.src[start + 2..self.index - multi as usize]) },
+            multi,
+        );
+        #[cfg(feature = "span")]
+        let data = Span {
+            data,
+            start: start,
+            end: self.index - !multi as usize,
+        };
+
+        #[cfg(feature = "line-count")]
+        self.metadata.cmnts.push(data);
+
+        #[cfg(all(feature = "comment", not(feature = "line-count")))]
+        self.cmnts.push(data);
     }
 
     fn value(&mut self) -> Result<Wrap<Value>, Error> {
@@ -382,7 +417,7 @@ impl<'a> Parser<'a> {
             #[cfg(feature = "line-count")]
             let tmp = memchr::memchr3(b'"', b'\\', b'\n', tmp);
             #[cfg(not(feature = "line-count"))]
-            let tmp = memchr::memchr2(b'"', b'\\', tmp);
+            let tmp = memchr2(b'"', b'\\', tmp);
 
             self.index += match tmp {
                 Some(v) => v,
