@@ -40,8 +40,8 @@ impl<'a> Parser<'a> {
     pub fn new(src: &'a str, comma: bool, trailing_comma: bool) -> Self {
         Self {
             comma,
-            stamp: 0,
             src: src.as_bytes(),
+            stamp: usize::MAX,
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
             #[cfg(feature = "prealloc")]
@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
             Err(v) => v,
             _ => {
                 self.index += 1;
-                Error::ExpectedEof
+                Error::UnexpectedToken
             }
         };
 
@@ -72,7 +72,7 @@ impl<'a> Parser<'a> {
             Span {
                 data,
                 start: match self.stamp {
-                    0 => self.index,
+                    usize::MAX => self.index,
                     v => v,
                 },
                 end: self.index,
@@ -228,9 +228,10 @@ impl<'a> Parser<'a> {
 
         let start = self.index.wrapping_add(1);
 
-        self.index += 4;
+        self.index = self.index.wrapping_add(4);
 
         if self.index >= self.src.len() {
+            self.index = start;
             return Err(Error::UnexpectedToken);
         }
 
@@ -241,6 +242,7 @@ impl<'a> Parser<'a> {
                 self.index += 1;
 
                 if self.index >= self.src.len() || &self.src[start..=self.index] != b"false" {
+                    self.index = start;
                     return Err(Error::UnexpectedToken);
                 }
 
@@ -467,19 +469,63 @@ impl<'a> Parser<'a> {
     #[inline(always)]
     fn number(&mut self) -> Result<Wrap<Value>, Error> {
         let mut int = true;
+
+        // flags indicating if either of them were encountered
+        let mut exp = false;
+        let mut exp_sign = false;
+
         let start = self.index.wrapping_add(1);
         let pos = !self.might(b'-');
         let tmp = self.index.wrapping_add(1);
 
+        const DIGIT: u8 = 1;
+        const DOT: u8 = 2;
+        const EXP: u8 = 3;
+        const EXP_SIGN: u8 = 4;
+        const LOOKUP: [u8; 256] = const {
+            let mut tmp = [0; 256];
+            let mut idx = b'0';
+
+            while idx <= b'9' {
+                tmp[idx as usize] = DIGIT;
+                idx += 1;
+            }
+
+            tmp[b'.' as usize] = DOT;
+            tmp[b'e' as usize] = EXP;
+            tmp[b'E' as usize] = EXP;
+            tmp[b'+' as usize] = EXP_SIGN;
+            tmp[b'-' as usize] = EXP_SIGN;
+
+            tmp
+        };
+
         loop {
-            let tmp = self.next();
+            match LOOKUP[self.next() as usize] {
+                DIGIT => continue,
+                DOT => {
+                    if !int {
+                        break;
+                    }
 
-            if !tmp.is_ascii_digit() {
-                if !int || tmp != b'.' {
-                    break;
+                    int = false;
                 }
+                EXP => {
+                    if exp {
+                        break;
+                    }
 
-                int = false
+                    exp = true;
+                    int = false;
+                }
+                EXP_SIGN => {
+                    if exp_sign {
+                        break;
+                    }
+
+                    exp_sign = true;
+                }
+                _ => break,
             }
         }
 
@@ -489,8 +535,11 @@ impl<'a> Parser<'a> {
             let tmp = match self.src[start] {
                 b'.' => Error::LeadingDecimal,
                 b'-' if self.index == start => Error::MissingDigitAfterNegative,
-                _ if self.src[self.index] == b'.' => Error::TrailingDecimal,
-                _ => break 'tmp,
+                _ => match self.src[self.index] {
+                    b'.' => Error::TrailingDecimal,
+                    v if !v.is_ascii_digit() => Error::ExpectedExponentValue,
+                    _ => break 'tmp,
+                },
             };
 
             self.stamp = start;
