@@ -42,7 +42,7 @@ impl Into<serde_json::Number> for Number {
             Number::Unsigned(value) => value.into(),
             Number::Signed(value) => value.into(),
             Number::Float(value) => {
-                serde_json::Number::from_f64(value).expect("value should be finite")
+                serde_json::Number::from_f64(value).expect("floating point number should be finite")
             }
         }
     }
