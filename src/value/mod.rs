@@ -1,8 +1,9 @@
+#[cfg(feature = "serde-json")]
+mod serde_json;
+
 mod index;
 mod number;
 mod object;
-#[cfg(feature = "serde-json")]
-mod serde_json;
 
 use std::fmt::Debug;
 
@@ -246,20 +247,5 @@ impl Debug for Value {
             Self::String(v) => v.fmt(f),
             Self::Object(v) => v.fmt(f),
         }
-    }
-}
-
-#[cfg(feature = "span")]
-impl From<Vec<Span<Value>>> for Value {
-    fn from(value: Vec<Span<Value>>) -> Self {
-        Self::Array(value)
-    }
-}
-
-#[cfg(feature = "span")]
-impl From<Vec<(Span<String>, Span<Value>)>> for Value {
-    fn from(mut value: Vec<(Span<std::string::String>, Span<Value>)>) -> Self {
-        value.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
-        Self::Object(Object(value))
     }
 }
