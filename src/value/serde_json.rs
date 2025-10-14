@@ -1,19 +1,15 @@
 #[cfg(feature = "span")]
 use crate::Span;
-#[cfg(feature = "serde-json")]
-use crate::value::Number;
-use crate::{Value, unwrap};
+
+use crate::{Value, value::Number};
 
 impl Into<serde_json::Value> for Value {
     fn into(self) -> serde_json::Value {
         match self {
             Value::Null => serde_json::Value::Null,
-            Value::Array(values) => serde_json::Value::Array(
-                values
-                    .into_iter()
-                    .map(|value| unwrap!(value).into())
-                    .collect(),
-            ),
+            Value::Array(values) => {
+                serde_json::Value::Array(values.into_iter().map(|value| value.into()).collect())
+            }
             Value::Boolean(value) => value.into(),
             Value::Number(value) => serde_json::Value::Number(value.into()),
             Value::String(value) => value.into(),
@@ -21,7 +17,15 @@ impl Into<serde_json::Value> for Value {
                 object
                     .0
                     .into_iter()
-                    .map(|(k, v)| (unwrap!(k), unwrap!(v).into()))
+                    .map(|(k, v)| {
+                        (
+                            #[cfg(feature = "span")]
+                            k.data,
+                            #[cfg(not(feature = "span"))]
+                            k,
+                            v.into(),
+                        )
+                    })
                     .collect(),
             ),
         }
@@ -35,7 +39,6 @@ impl Into<serde_json::Value> for Span<Value> {
     }
 }
 
-#[cfg(feature = "serde-json")]
 impl Into<serde_json::Number> for Number {
     fn into(self) -> serde_json::Number {
         match self {
