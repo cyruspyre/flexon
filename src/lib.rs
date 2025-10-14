@@ -64,21 +64,6 @@ macro_rules! wrap {
     };
 }
 
-#[cfg(feature = "span")]
-macro_rules! unwrap {
-    ($t:expr) => {
-        $t.data
-    };
-}
-
-#[cfg(not(feature = "span"))]
-macro_rules! unwrap {
-    ($t:expr) => {
-        $t
-    };
-}
-
-pub(crate) use unwrap;
 pub(crate) use wrap;
 
 /// Parses JSON with custom parsing options.
@@ -94,7 +79,7 @@ pub(crate) use wrap;
 /// ```rust
 /// use flexon::parse_with;
 ///
-/// let src = r#"{"numbers": [1, 2]}"#;
+/// let src = r#"{"numbers": [1, 2,]}"#;
 /// let value = parse_with(src, true, true).unwrap();
 /// ```
 pub fn parse_with(
