@@ -1,15 +1,22 @@
+use memchr::memchr2;
+
 #[cfg(feature = "line-count")]
 use crate::metadata::Metadata;
 
+#[cfg(feature = "span")]
+use crate::Span;
+
 use crate::{
+    Wrap,
     error::Error,
     misc::Bypass,
-    span::Span,
     value::{Number, Object, Value},
+    wrap,
 };
 
 use std::hint::unreachable_unchecked;
 
+/// JSON parser for... *JSON?*
 pub struct Parser<'a> {
     src: &'a [u8],
     stamp: usize,
@@ -21,15 +28,22 @@ pub struct Parser<'a> {
     #[cfg(feature = "line-count")]
     metadata: Metadata<'a>,
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    cmnts: Vec<Span<(&'a str, bool)>>,
+    cmnts: Vec<Wrap<(&'a str, bool)>>,
 }
 
 impl<'a> Parser<'a> {
+    /// Creates a new JSON `Parser` with the given options.
+    ///
+    /// # Arguments
+    ///
+    /// - `src`: The JSON source to parse.
+    /// - `comma`: Whether to require commas while parsing.
+    /// - `trailing_comma`: Whether trailing commas are allowed (has no effect when commas are optional).
     pub fn new(src: &'a str, comma: bool, trailing_comma: bool) -> Self {
         Self {
             comma,
-            stamp: 0,
             src: src.as_bytes(),
+            stamp: usize::MAX,
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
             #[cfg(feature = "prealloc")]
@@ -45,38 +59,46 @@ impl<'a> Parser<'a> {
     }
 
     #[inline(always)]
-    fn _parse<T>(mut self, handler: impl Fn(Span<Value>, Self) -> T) -> Result<T, Span<Error>> {
+    fn _parse<T>(mut self, handler: impl Fn(Wrap<Value>, Self) -> T) -> Result<T, Wrap<Error>> {
         let data = match self.value() {
             Ok(v) if self.skip_whitespace() == 0 => return Ok(handler(v, self)),
             Err(v) => v,
             _ => {
                 self.index += 1;
-                Error::ExpectedEof
+                Error::UnexpectedToken
             }
         };
 
-        Err(Span {
-            data,
-            start: match self.stamp {
-                0 => self.index,
-                v => v,
+        Err(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start: match self.stamp {
+                    usize::MAX => self.index,
+                    v => v,
+                },
+                end: self.index,
             },
-            end: self.index,
-        })
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 
+    /// Parses the JSON source into a single value.
     #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
-    pub fn parse(self) -> Result<Span<Value>, Span<Error>> {
+    pub fn parse(self) -> Result<wrap!(Value), wrap!(Error)> {
         self._parse(|v, _| v)
     }
 
+    /// Parses the JSON source and returns the value along with any comments.
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    pub fn parse(self) -> Result<(Span<Value>, Vec<Span<(&'a str, bool)>>), Span<Error>> {
+    pub fn parse(self) -> Result<(wrap!(Value), Vec<wrap!((&'a str, bool))>), wrap!(Error)> {
         self._parse(|a, b| (a, b.cmnts))
     }
 
+    /// Parses the JSON source and returns the value along with its metadata.
     #[cfg(feature = "line-count")]
-    pub fn parse(self) -> Result<(Span<Value>, Metadata<'a>), Span<Error>> {
+    pub fn parse(self) -> Result<(wrap!(Value), Metadata<'a>), wrap!(Error)> {
         self._parse(|a, b| (a, b.metadata))
     }
 
@@ -103,71 +125,42 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_whitespace(&mut self) -> u8 {
+        const WHITESPACE: u8 = 1;
+        const OTHER: u8 = 2;
+        const EOF: u8 = 255;
+
         #[cfg(feature = "comment")]
-        let mut count = 0;
-        #[cfg(feature = "comment")]
-        let mut flag = 0;
+        const COMMENT: u8 = 3;
+
+        const LOOKUP: [u8; 256] = const {
+            let mut tmp = [OTHER; 256];
+
+            tmp[0] = EOF;
+            tmp[' ' as usize] = WHITESPACE;
+            tmp['\t' as usize] = WHITESPACE;
+            tmp['\n' as usize] = WHITESPACE;
+            tmp['\r' as usize] = WHITESPACE;
+            tmp['\x0C' as usize] = WHITESPACE;
+
+            #[cfg(feature = "comment")]
+            (tmp['/' as usize] = COMMENT);
+
+            tmp
+        };
 
         loop {
             let tmp = self.next();
 
-            if tmp == 0 {
-                return 0;
-            }
+            match LOOKUP[tmp as usize] {
+                OTHER => {
+                    self.index = self.index.wrapping_sub(1);
 
-            #[cfg(feature = "comment")]
-            if flag > 0 {
-                let tmp = if flag == 1 && tmp == b'\n' {
-                    -1
-                } else if flag == 2
-                    && tmp == b'*'
-                    && *self.src.get(self.index + 1).unwrap_or(&0) == b'/'
-                {
-                    1
-                } else {
-                    count += 1;
-                    continue;
-                };
-
-                let start = self.index - count;
-                let data = Span {
-                    data: (
-                        unsafe { str::from_utf8_unchecked(&self.src[start..self.index]) },
-                        flag == 2,
-                    ),
-                    start: start - 2,
-                    end: self.index,
-                };
-
-                self.index = self.index.wrapping_add_signed(tmp);
-
-                #[cfg(feature = "line-count")]
-                self.metadata.cmnts.push(data);
-
-                #[cfg(all(feature = "comment", not(feature = "line-count")))]
-                self.cmnts.push(data);
-
-                flag = 0;
-                count = 0;
-            } else if tmp == b'/' {
-                let tmp = self.src[self.index + 1];
-
-                if tmp == b'/' {
-                    flag = 1
-                } else if tmp == b'*' {
-                    flag = 2
-                } else {
-                    continue;
+                    return tmp;
                 }
-
-                self.index += 1;
-                continue;
-            }
-
-            if !tmp.is_ascii_whitespace() {
-                self.index = self.index.wrapping_sub(1);
-
-                return tmp;
+                WHITESPACE => continue,
+                #[cfg(feature = "comment")]
+                COMMENT => self.comment(),
+                _ => return 0,
             }
         }
     }
@@ -191,23 +184,89 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn value(&mut self) -> Result<Span<Value>, Error> {
+    #[cfg(feature = "comment")]
+    #[inline(always)]
+    fn comment(&mut self) {
+        let Some(v) = self.src.get(self.index + 1) else {
+            return;
+        };
+        let start = self.index;
+        let mut multi = true;
+
+        match v {
+            b'/' => {
+                self.index += match memchr::memchr(b'\n', &self.src[self.index + 1..]) {
+                    Some(v) => v,
+                    _ => return self.index = self.src.len() - 1,
+                };
+
+                multi = false;
+                #[cfg(feature = "line-count")]
+                self.metadata.lines.push(self.index + 1);
+            }
+            b'*' => loop {
+                #[cfg(feature = "line-count")]
+                let tmp = memchr2(b'\n', b'/', &self.src[self.index + 1..]);
+                #[cfg(not(feature = "line-count"))]
+                let tmp = memchr::memchr(b'/', &self.src[self.index + 1..]);
+
+                self.index += match tmp {
+                    Some(v) => v,
+                    _ => return self.index = self.src.len() - 1,
+                };
+
+                if self.src[self.index] == b'*' {
+                    break;
+                }
+
+                self.index += 1;
+
+                #[cfg(feature = "line-count")]
+                if self.src[self.index] == b'\n' {
+                    self.metadata.lines.push(self.index);
+                }
+            },
+            _ => return,
+        }
+
+        self.index += 1;
+
+        let data = (
+            unsafe { str::from_utf8_unchecked(&self.src[start + 2..self.index - multi as usize]) },
+            multi,
+        );
+        #[cfg(feature = "span")]
+        let data = Span {
+            data,
+            start: start,
+            end: self.index - !multi as usize,
+        };
+
+        #[cfg(feature = "line-count")]
+        self.metadata.cmnts.push(data);
+
+        #[cfg(all(feature = "comment", not(feature = "line-count")))]
+        self.cmnts.push(data);
+    }
+
+    fn value(&mut self) -> Result<Wrap<Value>, Error> {
         'tmp: {
             return match self.skip_whitespace() {
                 0 => Err(Error::Eof),
                 b'"' => self.string(),
                 b'{' => self.object(),
                 b'[' => self.array(),
-                v if v == b'-' || v == b'.' || v.is_ascii_digit() => self.number(),
+                v if v == b'-' || v.is_ascii_digit() || v == b'.' => self.number(),
                 _ => break 'tmp,
             };
         };
 
         let start = self.index.wrapping_add(1);
 
-        self.index += 4;
+        self.index = self.index.wrapping_add(4);
 
         if self.index >= self.src.len() {
+            self.index = start;
             return Err(Error::UnexpectedToken);
         }
 
@@ -218,6 +277,7 @@ impl<'a> Parser<'a> {
                 self.index += 1;
 
                 if self.index >= self.src.len() || &self.src[start..=self.index] != b"false" {
+                    self.index = start;
                     return Err(Error::UnexpectedToken);
                 }
 
@@ -225,11 +285,16 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(Span {
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
             data,
-            start,
-            end: self.index,
-        })
+        )
     }
 
     #[inline(always)]
@@ -237,11 +302,12 @@ impl<'a> Parser<'a> {
         &mut self,
         de: u8,
         typ: usize,
-        mut handler: impl FnMut(&mut Vec<T>) -> Result<(), Error>,
+        mut handler: impl FnMut() -> Result<T, Error>,
         mut wrap: impl FnMut(Vec<T>) -> Value,
-    ) -> Result<Span<Value>, Error> {
+    ) -> Result<Wrap<Value>, Error> {
         self.index = self.index.wrapping_add(1);
 
+        #[cfg(feature = "span")]
         let start = self.index;
         let mut flag = false;
 
@@ -269,7 +335,7 @@ impl<'a> Parser<'a> {
                 return Err(Error::Expected(','));
             }
 
-            handler(&mut data)?;
+            data.push(handler()?);
 
             flag = true;
         }
@@ -278,20 +344,27 @@ impl<'a> Parser<'a> {
         #[cfg(feature = "prealloc")]
         (self.prev_sizes[typ] = data.len());
 
-        return Ok(Span {
-            data: wrap(data),
-            start,
-            end: self.index,
-        });
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data: wrap(data),
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            wrap(data),
+        )
     }
 
     #[inline(always)]
-    fn object(&mut self) -> Result<Span<Value>, Error> {
+    fn object(&mut self) -> Result<Wrap<Value>, Error> {
         self.bypass().field_like(
             b'}',
             0,
-            |data| {
+            || {
                 let key = self.string()?;
+
+                #[cfg(feature = "span")]
                 let key = Span {
                     data: match key.data {
                         Value::String(v) => v,
@@ -301,32 +374,35 @@ impl<'a> Parser<'a> {
                     end: key.end,
                 };
 
-                self.expect(b':')?;
-                data.push((key, self.value()?));
+                #[cfg(not(feature = "span"))]
+                let Value::String(key) = key else {
+                    unsafe { unreachable_unchecked() }
+                };
 
-                Ok(())
+                self.expect(b':')?;
+
+                Ok((key, self.value()?))
             },
             |mut v| {
-                v.sort_unstable_by(|a, b| a.0.data.cmp(&b.0.data));
+                v.sort_unstable_by(|a, b| {
+                    #[cfg(feature = "span")]
+                    return a.0.data.cmp(&b.0.data);
+
+                    #[cfg(not(feature = "span"))]
+                    a.0.cmp(&b.0)
+                });
                 Value::Object(Object(v))
             },
         )
     }
 
     #[inline(always)]
-    fn array(&mut self) -> Result<Span<Value>, Error> {
-        self.bypass().field_like(
-            b']',
-            1,
-            |data| {
-                data.push(self.value()?);
-                Ok(())
-            },
-            |v| Value::Array(v),
-        )
+    fn array(&mut self) -> Result<Wrap<Value>, Error> {
+        self.bypass()
+            .field_like(b']', 1, || Ok(self.value()?), |v| Value::Array(v))
     }
 
-    fn string(&mut self) -> Result<Span<Value>, Error> {
+    fn string(&mut self) -> Result<Wrap<Value>, Error> {
         self.expect(b'"')?;
 
         let stamp = self.index;
@@ -335,7 +411,24 @@ impl<'a> Parser<'a> {
         let mut err = false;
 
         loop {
-            let tmp = self.next();
+            self.index += 1;
+
+            let tmp = &self.src[self.index..];
+            #[cfg(feature = "line-count")]
+            let tmp = memchr::memchr3(b'"', b'\\', b'\n', tmp);
+            #[cfg(not(feature = "line-count"))]
+            let tmp = memchr2(b'"', b'\\', tmp);
+
+            self.index += match tmp {
+                Some(v) => v,
+                _ => return Err(Error::Eof),
+            };
+
+            let tmp = self.src[self.index];
+
+            if tmp == b'"' {
+                break;
+            }
 
             if tmp == b'\\' {
                 buf.extend_from_slice(&self.src[start..self.index]);
@@ -380,14 +473,6 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if tmp == b'"' {
-                break;
-            }
-
-            if tmp == 0 {
-                return Err(Error::Eof);
-            }
-
             // note to myself: don't use else if chains here. the generated asm jumps around
             // quite a few time for... a reason ik but cant explain properly
             // usually rustc is smart enough to optimize away such cases but in the
@@ -402,28 +487,80 @@ impl<'a> Parser<'a> {
 
         buf.extend_from_slice(&self.src[start..self.index]);
 
-        Ok(Span {
-            data: Value::String(unsafe { String::from_utf8_unchecked(buf) }),
-            start: stamp,
-            end: self.index,
-        })
+        let data = Value::String(unsafe { String::from_utf8_unchecked(buf) });
+
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start: stamp,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 
     #[inline(always)]
-    fn number(&mut self) -> Result<Span<Value>, Error> {
-        let mut dot = false;
+    fn number(&mut self) -> Result<Wrap<Value>, Error> {
+        let mut int = true;
+
+        // flags indicating if either of them were encountered
+        let mut exp = false;
+        let mut exp_sign = false;
+
         let start = self.index.wrapping_add(1);
-        let neg = self.might(b'-');
+        let pos = !self.might(b'-');
+        let tmp = self.index.wrapping_add(1);
+
+        const DIGIT: u8 = 1;
+        const DOT: u8 = 2;
+        const EXP: u8 = 3;
+        const EXP_SIGN: u8 = 4;
+        const LOOKUP: [u8; 256] = const {
+            let mut tmp = [0; 256];
+            let mut idx = b'0';
+
+            while idx <= b'9' {
+                tmp[idx as usize] = DIGIT;
+                idx += 1;
+            }
+
+            tmp[b'.' as usize] = DOT;
+            tmp[b'e' as usize] = EXP;
+            tmp[b'E' as usize] = EXP;
+            tmp[b'+' as usize] = EXP_SIGN;
+            tmp[b'-' as usize] = EXP_SIGN;
+
+            tmp
+        };
 
         loop {
-            let tmp = self.next();
+            match LOOKUP[self.next() as usize] {
+                DIGIT => continue,
+                DOT => {
+                    if !int {
+                        break;
+                    }
 
-            if !tmp.is_ascii_digit() {
-                if dot || tmp != b'.' {
-                    break;
+                    int = false;
                 }
+                EXP => {
+                    if exp {
+                        break;
+                    }
 
-                dot = true
+                    exp = true;
+                    int = false;
+                }
+                EXP_SIGN => {
+                    if exp_sign {
+                        break;
+                    }
+
+                    exp_sign = true;
+                }
+                _ => break,
             }
         }
 
@@ -433,30 +570,42 @@ impl<'a> Parser<'a> {
             let tmp = match self.src[start] {
                 b'.' => Error::LeadingDecimal,
                 b'-' if self.index == start => Error::MissingDigitAfterNegative,
-                _ if self.src[self.index] == b'.' => Error::TrailingDecimal,
-                _ => break 'tmp,
+                _ => match self.src[self.index] {
+                    b'.' => Error::TrailingDecimal,
+                    v if !v.is_ascii_digit() => Error::ExpectedExponentValue,
+                    _ => break 'tmp,
+                },
             };
 
             self.stamp = start;
             return Err(tmp);
         }
 
-        let data = unsafe { str::from_utf8_unchecked(&self.src[start..=self.index]) };
-        let data = if dot && let Ok(v) = data.parse() {
+        let data = unsafe { str::from_utf8_unchecked(&self.src[tmp..=self.index]) };
+        let data = if int
+            && let Ok(v) = data.parse::<u64>()
+            && (pos || v <= i64::MIN as _)
+        {
+            match pos {
+                true => Number::Unsigned(v),
+                _ => Number::Signed(v.wrapping_neg() as _),
+            }
+        } else if let Ok(v) = fast_float2::parse(&self.src[start..=self.index]) {
             Number::Float(v)
-        } else if neg && let Ok(v) = data.parse() {
-            Number::Signed(v)
-        } else if let Ok(v) = data.parse() {
-            Number::Unsigned(v)
         } else {
-            self.stamp = start;
             return Err(Error::NumberOverflow);
         };
+        let data = Value::Number(data);
 
-        return Ok(Span {
-            data: Value::Number(data),
-            start,
-            end: self.index,
-        });
+        Ok(
+            #[cfg(feature = "span")]
+            Span {
+                data,
+                start,
+                end: self.index,
+            },
+            #[cfg(not(feature = "span"))]
+            data,
+        )
     }
 }

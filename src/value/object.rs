@@ -1,18 +1,32 @@
 use std::fmt::Debug;
 
-use crate::{span::Span, value::Value};
+use crate::{value::Value, wrap};
 
-pub struct Object(pub(crate) Vec<(Span<String>, Span<Value>)>);
+#[cfg(feature = "span")]
+use crate::Span;
+
+/// A JSON object, represented as a sorted list of key-value pairs which use
+/// binary search for lookups.
+pub struct Object(pub(crate) Vec<(wrap!(String), wrap!(Value))>);
 
 impl Object {
-    pub fn get_key_value(&self, key: &str) -> Option<&(Span<String>, Span<Value>)> {
-        match self.0.binary_search_by(|v| key.cmp(&v.0.data)) {
+    /// Returns the key-value pair corresponding to the given key, if it exists.
+    pub fn get_key_value(&self, key: &str) -> Option<&(wrap!(String), wrap!(Value))> {
+        match self.0.binary_search_by(|v| {
+            key.cmp(
+                #[cfg(feature = "span")]
+                &v.0.data,
+                #[cfg(not(feature = "span"))]
+                &v.0,
+            )
+        }) {
             Ok(v) => Some(&self.0[v]),
             _ => None,
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Span<Value>> {
+    /// Returns a reference to the value corresponding to the key.
+    pub fn get(&self, key: &str) -> Option<&wrap!(Value)> {
         self.get_key_value(key).map(|v| &v.1)
     }
 }

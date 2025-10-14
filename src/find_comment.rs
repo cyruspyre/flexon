@@ -1,8 +1,14 @@
-use crate::Span;
+use crate::{Span, misc::Sealed};
 
-pub trait FindComment {
+/// A trait for finding comment by byte index.
+///
+/// This is a sealed trait, only to be implemented by `flexon`.
+pub trait FindComment: Sealed {
+    /// Finds the comment that contains the given index, if any.
     fn find_comment(&self, index: usize) -> Option<Span<(&'_ str, bool)>>;
 }
+
+impl Sealed for Vec<Span<(&str, bool)>> {}
 
 impl FindComment for Vec<Span<(&str, bool)>> {
     fn find_comment(&self, index: usize) -> Option<Span<(&'_ str, bool)>> {

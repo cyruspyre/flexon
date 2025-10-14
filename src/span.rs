@@ -1,5 +1,6 @@
 use std::{fmt::Debug, hash::Hash, ops::Deref};
 
+/// A value wrapped with its starting and ending byte index.
 pub struct Span<T> {
     pub(crate) data: T,
     pub(crate) start: usize,
@@ -7,16 +8,19 @@ pub struct Span<T> {
 }
 
 impl<T> Span<T> {
+    /// Returns a reference to its value.
     #[inline]
     pub fn data(&self) -> &T {
         &self.data
     }
 
+    /// Returns its starting byte index.
     #[inline]
     pub fn start(&self) -> usize {
         self.start
     }
 
+    /// Returns its ending byte index.
     #[inline]
     pub fn end(&self) -> usize {
         self.end

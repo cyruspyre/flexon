@@ -1,6 +1,6 @@
 [package]
 name = "flexon"
-version = "0.2.2"
+version = "0.2.4"
 edition = "2024"
 description = "Yet another JSON parser"
 repository = "https://github.com/cyruspyre/flexon"
@@ -24,10 +24,13 @@ harness = false
 
 [features]
 default = ["prealloc"]
+span = []
 comment = []
 prealloc = []
-line-count = ["comment"]
+line-count = ["comment", "span"]
 serde-json = ["serde_json"]
 
 [dependencies]
 serde_json = { version = "1.0.145", optional = true }
+fast-float2 = "0.2.3"
+memchr = "2.7.6"
