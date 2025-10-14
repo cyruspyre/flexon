@@ -64,6 +64,21 @@ macro_rules! wrap {
     };
 }
 
+#[cfg(feature = "span")]
+macro_rules! unwrap {
+    ($t:expr) => {
+        $t.data
+    };
+}
+
+#[cfg(not(feature = "span"))]
+macro_rules! unwrap {
+    ($t:expr) => {
+        $t
+    };
+}
+
+pub(crate) use unwrap;
 pub(crate) use wrap;
 
 /// Parses JSON with custom parsing options.
