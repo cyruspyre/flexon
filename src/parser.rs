@@ -14,7 +14,11 @@ use crate::{
     wrap,
 };
 
-use std::hint::unreachable_unchecked;
+use std::{
+    alloc::Layout,
+    hint::unreachable_unchecked,
+    ptr::{dangling_mut, null_mut},
+};
 
 /// JSON parser for... *JSON?*
 pub struct Parser<'a> {
@@ -301,7 +305,7 @@ impl<'a> Parser<'a> {
     fn field_like<T>(
         &mut self,
         de: u8,
-        typ: usize,
+        #[cfg(feature = "prealloc")] typ: usize,
         mut handler: impl FnMut() -> Result<T, Error>,
         mut wrap: impl FnMut(Vec<T>) -> Value,
     ) -> Result<Wrap<Value>, Error> {
@@ -360,6 +364,7 @@ impl<'a> Parser<'a> {
     fn object(&mut self) -> Result<Wrap<Value>, Error> {
         self.bypass().field_like(
             b'}',
+            #[cfg(feature = "prealloc")]
             0,
             || {
                 let key = self.string()?;
@@ -398,16 +403,24 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     fn array(&mut self) -> Result<Wrap<Value>, Error> {
-        self.bypass()
-            .field_like(b']', 1, || Ok(self.value()?), |v| Value::Array(v))
+        self.bypass().field_like(
+            b']',
+            #[cfg(feature = "prealloc")]
+            1,
+            || Ok(self.value()?),
+            |v| Value::Array(v),
+        )
     }
 
+    // He who controls string, controls speed
     fn string(&mut self) -> Result<Wrap<Value>, Error> {
         self.expect(b'"')?;
 
         let stamp = self.index;
         let mut start = stamp + 1;
-        let mut buf = Vec::new();
+        let mut buf = null_mut::<u8>();
+        let mut cap = 0;
+        let mut len = 0;
         let mut err = false;
 
         loop {
@@ -431,8 +444,28 @@ impl<'a> Parser<'a> {
             }
 
             if tmp == b'\\' {
-                buf.extend_from_slice(&self.src[start..self.index]);
+                let src = &self.src[start..self.index];
+                let new_len = len + src.len() + 1;
 
+                if cap < new_len {
+                    let tmp = new_len * 3 / 2;
+
+                    buf = unsafe {
+                        std::alloc::realloc(
+                            buf,
+                            Layout::array::<u8>(cap).unwrap(),
+                            Layout::array::<u8>(tmp).unwrap().size(),
+                        )
+                    };
+                    cap = tmp;
+                }
+
+                unsafe {
+                    buf.add(len)
+                        .copy_from_nonoverlapping(src.as_ptr(), src.len())
+                }
+
+                len += src.len();
                 start = self.index + 2;
 
                 let tmp = match self.next() {
@@ -469,7 +502,9 @@ impl<'a> Parser<'a> {
                     }
                 };
 
-                buf.push(tmp);
+                unsafe { buf.add(len).write(tmp) }
+                len += 1;
+
                 continue;
             }
 
@@ -485,9 +520,32 @@ impl<'a> Parser<'a> {
             return Err(Error::InvalidEscapeSequnce);
         }
 
-        buf.extend_from_slice(&self.src[start..self.index]);
+        let src = &self.src[start..self.index];
+        let new_len = len + src.len();
 
-        let data = Value::String(unsafe { String::from_utf8_unchecked(buf) });
+        if cap < new_len {
+            buf = unsafe {
+                std::alloc::realloc(
+                    buf,
+                    Layout::array::<u8>(cap).unwrap(),
+                    Layout::array::<u8>(new_len).unwrap().size(),
+                )
+            };
+            cap = new_len;
+        }
+
+        unsafe {
+            buf.add(len)
+                .copy_from_nonoverlapping(src.as_ptr(), src.len())
+        }
+
+        let data = Value::String(unsafe {
+            String::from_raw_parts(
+                if new_len == 0 { dangling_mut() } else { buf },
+                new_len,
+                cap,
+            )
+        });
 
         Ok(
             #[cfg(feature = "span")]
@@ -567,6 +625,8 @@ impl<'a> Parser<'a> {
         self.index -= 1;
 
         'tmp: {
+            self.stamp = start;
+
             let tmp = match self.src[start] {
                 b'.' => Error::LeadingDecimal,
                 b'-' if self.index == start => Error::MissingDigitAfterNegative,
@@ -577,7 +637,6 @@ impl<'a> Parser<'a> {
                 },
             };
 
-            self.stamp = start;
             return Err(tmp);
         }
 
