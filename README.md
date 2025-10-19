@@ -13,7 +13,7 @@ println!("{val:#?} at {}..={}", val.start(), val.end());
 ```
 But wait, what about comments? For that you need to enable `comment` feature
 ```rs
-use flexon::Parser;
+use flexon::{Parser, source::Slice};
 
 let src = r#"
 {
@@ -29,7 +29,7 @@ let src = r#"
 "#;
 
 let parser = Parser::new(
-    src,
+    Slice::from(src),
     false, // Require commas
     false, // Allow trailing commas (has no effect when commas are optional)
 );
