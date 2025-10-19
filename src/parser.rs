@@ -222,16 +222,17 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
                     v => v,
                 };
 
+                #[cfg(feature = "line-count")]
+                if self.src.get(self.index) == b'\n' {
+                    self.metadata.lines.push(self.index);
+                    continue;
+                }
+
                 if self.src.get(tmp - 1) == b'*' {
                     break;
                 }
 
                 self.index += 1;
-
-                #[cfg(feature = "line-count")]
-                if self.src.get(self.index) == b'\n' {
-                    self.metadata.lines.push(self.index);
-                }
             },
             _ => return,
         }
