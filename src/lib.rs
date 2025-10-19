@@ -21,6 +21,7 @@
 //! - **`line-count`** - Include line information and allow searching comments by line index. Performance overhead is somewhat minimal
 //! - **`prealloc`** *(default)* - Pre-allocate memory when parsing for faster performance, with possible memory trade-offs
 //! - **`span`** - Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%
+//! - **`serde-json`**: Implements `Into<serde_json::Value>` for `flexon::Value`
 
 use crate::source::Slice;
 pub use crate::{error::Error, parser::Parser, value::Value};
