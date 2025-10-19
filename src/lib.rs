@@ -22,6 +22,7 @@
 //! - **`prealloc`** *(default)* - Pre-allocate memory when parsing for faster performance, with possible memory trade-offs
 //! - **`span`** - Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%
 
+use crate::source::Slice;
 pub use crate::{error::Error, parser::Parser, value::Value};
 
 #[cfg(all(feature = "comment", feature = "span"))]
@@ -42,6 +43,7 @@ mod span;
 mod error;
 mod misc;
 mod parser;
+pub mod source;
 pub mod value;
 
 #[cfg(feature = "span")]
@@ -87,13 +89,15 @@ pub fn parse_with(
     comma: bool,
     trailing_comma: bool,
 ) -> Result<wrap!(Value), wrap!(Error)> {
-    Parser::new(src, comma, trailing_comma).parse().map(|v| {
-        #[cfg(feature = "comment")]
-        return v.0;
+    Parser::new(Slice::from(src), comma, trailing_comma)
+        .parse()
+        .map(|v| {
+            #[cfg(feature = "comment")]
+            return v.0;
 
-        #[cfg(not(feature = "comment"))]
-        v
-    })
+            #[cfg(not(feature = "comment"))]
+            v
+        })
 }
 
 /// Parses JSON with default parsing options.

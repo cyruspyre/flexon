@@ -1,5 +1,3 @@
-use memchr::memchr2;
-
 #[cfg(feature = "line-count")]
 use crate::metadata::Metadata;
 
@@ -10,19 +8,24 @@ use crate::{
     Wrap,
     error::Error,
     misc::Bypass,
+    source::Source,
     value::{Number, Object, Value},
     wrap,
 };
 
+#[cfg(feature = "comment")]
+use std::borrow::Cow;
+
 use std::{
     alloc::Layout,
     hint::unreachable_unchecked,
+    marker::PhantomData,
     ptr::{dangling_mut, null_mut},
 };
 
 /// JSON parser for... *JSON?*
-pub struct Parser<'a> {
-    src: &'a [u8],
+pub struct Parser<'a, S: Source> {
+    src: S,
     stamp: usize,
     index: usize,
     comma: bool,
@@ -32,10 +35,11 @@ pub struct Parser<'a> {
     #[cfg(feature = "line-count")]
     metadata: Metadata<'a>,
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    cmnts: Vec<Wrap<(&'a str, bool)>>,
+    cmnts: Vec<Wrap<(Cow<'a, str>, bool)>>,
+    phantom: PhantomData<&'a ()>,
 }
 
-impl<'a> Parser<'a> {
+impl<'a, S: Source + 'a> Parser<'a, S> {
     /// Creates a new JSON `Parser` with the given options.
     ///
     /// # Arguments
@@ -43,10 +47,10 @@ impl<'a> Parser<'a> {
     /// - `src`: The JSON source to parse.
     /// - `comma`: Whether to require commas while parsing.
     /// - `trailing_comma`: Whether trailing commas are allowed (has no effect when commas are optional).
-    pub fn new(src: &'a str, comma: bool, trailing_comma: bool) -> Self {
+    pub fn new(src: S, comma: bool, trailing_comma: bool) -> Self {
         Self {
             comma,
-            src: src.as_bytes(),
+            src,
             stamp: usize::MAX,
             index: usize::MAX,
             trailing_comma: comma && !trailing_comma,
@@ -59,6 +63,7 @@ impl<'a> Parser<'a> {
             },
             #[cfg(all(feature = "comment", not(feature = "line-count")))]
             cmnts: Vec::new(),
+            phantom: PhantomData,
         }
     }
 
@@ -96,7 +101,7 @@ impl<'a> Parser<'a> {
 
     /// Parses the JSON source and returns the value along with any comments.
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    pub fn parse(self) -> Result<(wrap!(Value), Vec<wrap!((&'a str, bool))>), wrap!(Error)> {
+    pub fn parse(self) -> Result<(wrap!(Value), Vec<wrap!((Cow<'a, str>, bool))>), wrap!(Error)> {
         self._parse(|a, b| (a, b.cmnts))
     }
 
@@ -110,10 +115,7 @@ impl<'a> Parser<'a> {
         self.index = self.index.wrapping_add(1);
 
         let index = self.index;
-        let tmp = match self.src.get(index) {
-            Some(v) => *v,
-            _ => return 0,
-        };
+        let tmp = self.src.get_checked(index);
 
         #[cfg(feature = "line-count")]
         if tmp == b'\n'
@@ -191,17 +193,18 @@ impl<'a> Parser<'a> {
     #[cfg(feature = "comment")]
     #[inline(always)]
     fn comment(&mut self) {
-        let Some(v) = self.src.get(self.index + 1) else {
-            return;
+        let v = match self.src.get_checked(self.index + 1) {
+            0 => return,
+            v => v,
         };
         let start = self.index;
         let mut multi = true;
 
         match v {
             b'/' => {
-                self.index += match memchr::memchr(b'\n', &self.src[self.index + 1..]) {
-                    Some(v) => v,
-                    _ => return self.index = self.src.len() - 1,
+                self.index = match self.src.unbounded_search([b'\n'], self.index + 1) {
+                    0 => return self.index = self.src.len() - 1,
+                    v => v,
                 };
 
                 multi = false;
@@ -210,33 +213,38 @@ impl<'a> Parser<'a> {
             }
             b'*' => loop {
                 #[cfg(feature = "line-count")]
-                let tmp = memchr2(b'\n', b'/', &self.src[self.index + 1..]);
+                let tmp = self.src.unbounded_search([b'\n', b'/'], self.index + 1);
                 #[cfg(not(feature = "line-count"))]
-                let tmp = memchr::memchr(b'/', &self.src[self.index + 1..]);
+                let tmp = self.src.unbounded_search([b'/'], self.index + 1);
 
-                self.index += match tmp {
-                    Some(v) => v,
-                    _ => return self.index = self.src.len() - 1,
+                self.index = match tmp {
+                    0 => return self.index = self.src.len() - 1,
+                    v => v,
                 };
 
-                if self.src[self.index] == b'*' {
+                if self.src.get(tmp - 1) == b'*' {
                     break;
                 }
 
                 self.index += 1;
 
                 #[cfg(feature = "line-count")]
-                if self.src[self.index] == b'\n' {
+                if self.src.get(self.index) == b'\n' {
                     self.metadata.lines.push(self.index);
                 }
             },
             _ => return,
         }
 
-        self.index += 1;
-
+        let data = unsafe {
+            str::from_utf8_unchecked(&self.src.slice(start + 2..self.index - multi as usize))
+        };
         let data = (
-            unsafe { str::from_utf8_unchecked(&self.src[start + 2..self.index - multi as usize]) },
+            if S::BORROWED {
+                Cow::Borrowed(unsafe { &*(data as *const _) })
+            } else {
+                Cow::Owned(data.to_string())
+            },
             multi,
         );
         #[cfg(feature = "span")]
@@ -268,19 +276,20 @@ impl<'a> Parser<'a> {
         let start = self.index.wrapping_add(1);
 
         self.index = self.index.wrapping_add(4);
+        self.src.hint(self.index + 1);
 
         if self.index >= self.src.len() {
             self.index = start;
             return Err(Error::UnexpectedToken);
         }
 
-        let data = match &self.src[start..=self.index] {
+        let data = match self.src.slice(start..=self.index) {
             b"true" => Value::Boolean(true),
             b"null" => Value::Null,
             _ => {
                 self.index += 1;
 
-                if self.index >= self.src.len() || &self.src[start..=self.index] != b"false" {
+                if self.index >= self.src.len() || self.src.slice(start..=self.index) != b"false" {
                     self.index = start;
                     return Err(Error::UnexpectedToken);
                 }
@@ -426,25 +435,25 @@ impl<'a> Parser<'a> {
         loop {
             self.index += 1;
 
-            let tmp = &self.src[self.index..];
             #[cfg(feature = "line-count")]
-            let tmp = memchr::memchr3(b'"', b'\\', b'\n', tmp);
+            let tmp = self.src.unbounded_search([b'"', b'\\', b'\n'], self.index);
             #[cfg(not(feature = "line-count"))]
-            let tmp = memchr2(b'"', b'\\', tmp);
+            let tmp = self.src.unbounded_search([b'"', b'\\'], self.index);
 
-            self.index += match tmp {
-                Some(v) => v,
-                _ => return Err(Error::Eof),
-            };
+            if tmp == 0 {
+                return Err(Error::Eof);
+            }
 
-            let tmp = self.src[self.index];
+            self.index = tmp;
+
+            let tmp = self.src.get(self.index);
 
             if tmp == b'"' {
                 break;
             }
 
             if tmp == b'\\' {
-                let src = &self.src[start..self.index];
+                let src = self.src.slice(start..self.index);
                 let new_len = len + src.len() + 1;
 
                 if cap < new_len {
@@ -479,6 +488,7 @@ impl<'a> Parser<'a> {
                     b'/' => b'/',
                     b'u' => {
                         self.index += 4;
+                        self.src.hint(self.index);
 
                         if self.index >= self.src.len() {
                             err = true;
@@ -486,7 +496,7 @@ impl<'a> Parser<'a> {
                         }
 
                         let Ok(tmp) = u8::from_str_radix(
-                            unsafe { str::from_utf8_unchecked(&self.src[start..=self.index]) },
+                            unsafe { str::from_utf8_unchecked(self.src.slice(start..=self.index)) },
                             16,
                         ) else {
                             err = true;
@@ -507,20 +517,15 @@ impl<'a> Parser<'a> {
 
                 continue;
             }
-
-            // note to myself: don't use else if chains here. the generated asm jumps around
-            // quite a few time for... a reason ik but cant explain properly
-            // usually rustc is smart enough to optimize away such cases but in the
-            // above case rustc wasn't able to do it and the code was
-            // roughly `0.1 ms` slower... ig the compiler got waku waku and got distracted
         }
 
         if err {
             self.stamp = stamp;
+            self.src.stamp(stamp);
             return Err(Error::InvalidEscapeSequnce);
         }
 
-        let src = &self.src[start..self.index];
+        let src = self.src.slice(start..self.index);
         let new_len = len + src.len();
 
         if cap < new_len {
@@ -626,11 +631,12 @@ impl<'a> Parser<'a> {
 
         'tmp: {
             self.stamp = start;
+            self.src.stamp(start);
 
-            let tmp = match self.src[start] {
+            let tmp = match self.src.get(start) {
                 b'.' => Error::LeadingDecimal,
                 b'-' if self.index == start => Error::MissingDigitAfterNegative,
-                _ => match self.src[self.index] {
+                _ => match self.src.get(self.index) {
                     b'.' => Error::TrailingDecimal,
                     v if !v.is_ascii_digit() => Error::ExpectedExponentValue,
                     _ => break 'tmp,
@@ -640,7 +646,7 @@ impl<'a> Parser<'a> {
             return Err(tmp);
         }
 
-        let data = unsafe { str::from_utf8_unchecked(&self.src[tmp..=self.index]) };
+        let data = unsafe { str::from_utf8_unchecked(self.src.slice(tmp..=self.index)) };
         let data = if int
             && let Ok(v) = data.parse::<u64>()
             && (pos || v <= i64::MIN as _)
@@ -649,7 +655,7 @@ impl<'a> Parser<'a> {
                 true => Number::Unsigned(v),
                 _ => Number::Signed(v.wrapping_neg() as _),
             }
-        } else if let Ok(v) = fast_float2::parse(&self.src[start..=self.index]) {
+        } else if let Ok(v) = fast_float2::parse(self.src.slice(start..=self.index)) {
             Number::Float(v)
         } else {
             return Err(Error::NumberOverflow);

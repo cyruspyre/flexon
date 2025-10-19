@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use crate::{find_comment::FindComment, misc::Sealed, span::Span};
 
 /// Metadata about the source code, including its line offsets and comments.
 #[derive(Debug)]
 pub struct Metadata<'a> {
     pub(crate) lines: Vec<usize>,
-    pub(crate) cmnts: Vec<Span<(&'a str, bool)>>,
+    pub(crate) cmnts: Vec<Span<(Cow<'a, str>, bool)>>,
 }
 
 impl Metadata<'_> {
@@ -21,7 +23,7 @@ impl Metadata<'_> {
     }
 
     /// Finds comment for the given line index, if any.
-    pub fn find_comment_by_line(&self, index: usize) -> Option<Span<(&'_ str, bool)>> {
+    pub fn find_comment_by_line(&self, index: usize) -> Option<&Span<(Cow<'_, str>, bool)>> {
         match self.lines.get(index) {
             Some(v) => self.find_comment(v.wrapping_sub(1)),
             _ => None,
@@ -32,7 +34,7 @@ impl Metadata<'_> {
 impl Sealed for Metadata<'_> {}
 
 impl FindComment for Metadata<'_> {
-    fn find_comment(&self, index: usize) -> Option<Span<(&'_ str, bool)>> {
+    fn find_comment(&self, index: usize) -> Option<&Span<(Cow<'_, str>, bool)>> {
         self.cmnts.find_comment(index)
     }
 }
