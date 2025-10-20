@@ -36,6 +36,8 @@ pub struct Parser<'a, S: Source> {
     metadata: Metadata<'a>,
     #[cfg(all(feature = "comment", not(feature = "line-count")))]
     cmnts: Vec<Wrap<(Cow<'a, str>, bool)>>,
+    #[cfg(feature = "comment")]
+    allow_cmnt: bool,
     phantom: PhantomData<&'a ()>,
 }
 
@@ -56,6 +58,8 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
             trailing_comma: comma && !trailing_comma,
             #[cfg(feature = "prealloc")]
             prev_sizes: [0; 2],
+            #[cfg(feature = "comment")]
+            allow_cmnt: false,
             #[cfg(feature = "line-count")]
             metadata: Metadata {
                 lines: Vec::new(),
@@ -94,20 +98,31 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
     }
 
     /// Parses the JSON source into a single value.
-    #[cfg(all(not(feature = "line-count"), not(feature = "comment")))]
     pub fn parse(self) -> Result<wrap!(Value), wrap!(Error)> {
         self._parse(|v, _| v)
     }
 
     /// Parses the JSON source and returns the value along with any comments.
-    #[cfg(all(feature = "comment", not(feature = "line-count")))]
-    pub fn parse(self) -> Result<(wrap!(Value), Vec<wrap!((Cow<'a, str>, bool))>), wrap!(Error)> {
-        self._parse(|a, b| (a, b.cmnts))
+    #[cfg(feature = "comment")]
+    pub fn parse_with_comments(
+        mut self,
+    ) -> Result<(wrap!(Value), Vec<wrap!((Cow<'a, str>, bool))>), wrap!(Error)> {
+        self.allow_cmnt = true;
+        self._parse(|a, b| {
+            (
+                a,
+                #[cfg(feature = "line-count")]
+                b.metadata.cmnts,
+                #[cfg(all(feature = "comment", not(feature = "line-count")))]
+                b.cmnts,
+            )
+        })
     }
 
     /// Parses the JSON source and returns the value along with its metadata.
     #[cfg(feature = "line-count")]
-    pub fn parse(self) -> Result<(wrap!(Value), Metadata<'a>), wrap!(Error)> {
+    pub fn parse_with_metadata(mut self) -> Result<(wrap!(Value), Metadata<'a>), wrap!(Error)> {
+        self.allow_cmnt = true;
         self._parse(|a, b| (a, b.metadata))
     }
 
@@ -165,7 +180,13 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
                 }
                 WHITESPACE => continue,
                 #[cfg(feature = "comment")]
-                COMMENT => self.comment(),
+                COMMENT => {
+                    if self.allow_cmnt {
+                        self.comment();
+                    }
+
+                    continue;
+                }
                 _ => return 0,
             }
         }

@@ -90,15 +90,7 @@ pub fn parse_with(
     comma: bool,
     trailing_comma: bool,
 ) -> Result<wrap!(Value), wrap!(Error)> {
-    Parser::new(Slice::from(src), comma, trailing_comma)
-        .parse()
-        .map(|v| {
-            #[cfg(feature = "comment")]
-            return v.0;
-
-            #[cfg(not(feature = "comment"))]
-            v
-        })
+    Parser::new(Slice::from(src), comma, trailing_comma).parse()
 }
 
 /// Parses JSON with default parsing options.
