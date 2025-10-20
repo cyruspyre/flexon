@@ -104,6 +104,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
 
     /// Parses the JSON source and returns the value along with any comments.
     #[cfg(feature = "comment")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "comment")))]
     pub fn parse_with_comments(
         mut self,
     ) -> Result<(wrap!(Value), Vec<wrap!((Cow<'a, str>, bool))>), wrap!(Error)> {
@@ -121,6 +122,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
 
     /// Parses the JSON source and returns the value along with its metadata.
     #[cfg(feature = "line-count")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "line-count")))]
     pub fn parse_with_metadata(mut self) -> Result<(wrap!(Value), Metadata<'a>), wrap!(Error)> {
         self.allow_cmnt = true;
         self._parse(|a, b| (a, b.metadata))

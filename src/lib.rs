@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! # flexon
 //!
 //! A JSON parser with span tracking and optional comment support.
@@ -24,12 +26,15 @@
 //! - **`serde-json`**: Implements `Into<serde_json::Value>` for `flexon::Value`
 
 use crate::source::Slice;
+#[doc(inline)]
 pub use crate::{error::Error, parser::Parser, value::Value};
 
 #[cfg(all(feature = "comment", feature = "span"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "comment", feature = "span"))))]
 pub use find_comment::FindComment;
 
 #[cfg(feature = "span")]
+#[cfg_attr(docsrs, doc(cfg(feature = "span")))]
 pub use crate::span::Span;
 
 #[cfg(feature = "line-count")]
