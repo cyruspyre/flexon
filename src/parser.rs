@@ -17,7 +17,7 @@ use crate::{
 use std::borrow::Cow;
 
 use std::{
-    alloc::Layout,
+    alloc::{Layout, dealloc, realloc},
     hint::unreachable_unchecked,
     marker::PhantomData,
     ptr::{dangling_mut, null_mut},
@@ -478,13 +478,13 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
 
             if tmp == b'\\' {
                 let src = self.src.slice(start..self.index);
-                let new_len = len + src.len() + 1;
+                let new_len = len + src.len() + 4;
 
                 if cap < new_len {
                     let tmp = new_len * 3 / 2;
 
                     buf = unsafe {
-                        std::alloc::realloc(
+                        realloc(
                             buf,
                             Layout::array::<u8>(cap).unwrap(),
                             Layout::array::<u8>(tmp).unwrap().size(),
@@ -501,6 +501,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
                 len += src.len();
                 start = self.index + 2;
 
+                let buf = unsafe { buf.add(len) };
                 let tmp = match self.next() {
                     b'"' => b'"',
                     b'\\' => b'\\',
@@ -511,24 +512,13 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
                     b'f' => b'\x0C',
                     b'/' => b'/',
                     b'u' => {
-                        self.index += 4;
-                        self.src.hint(self.index);
+                        let tmp = self.unicode_escape(buf, start);
 
-                        if self.index >= self.src.len() {
-                            err = true;
-                            continue;
-                        }
+                        start = self.index + 1;
+                        err |= tmp == 0;
+                        len += tmp;
 
-                        let Ok(tmp) = u8::from_str_radix(
-                            unsafe { str::from_utf8_unchecked(self.src.slice(start..=self.index)) },
-                            16,
-                        ) else {
-                            err = true;
-                            continue;
-                        };
-
-                        start += 4;
-                        tmp
+                        continue;
                     }
                     _ => {
                         err = true;
@@ -536,7 +526,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
                     }
                 };
 
-                unsafe { buf.add(len).write(tmp) }
+                unsafe { buf.write(tmp) }
                 len += 1;
 
                 continue;
@@ -546,6 +536,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
         if err {
             self.stamp = stamp;
             self.src.stamp(stamp);
+            unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap()) };
             return Err(Error::InvalidEscapeSequnce);
         }
 
@@ -554,7 +545,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
 
         if cap < new_len {
             buf = unsafe {
-                std::alloc::realloc(
+                realloc(
                     buf,
                     Layout::array::<u8>(cap).unwrap(),
                     Layout::array::<u8>(new_len).unwrap().size(),
@@ -586,6 +577,63 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
             #[cfg(not(feature = "span"))]
             data,
         )
+    }
+
+    #[inline(always)]
+    fn unicode_escape(&mut self, buf: *mut u8, mut start: usize) -> usize {
+        self.index += 4;
+        self.src.hint(self.index);
+
+        if self.index >= self.src.len() {
+            self.index -= 4;
+            return 0;
+        }
+
+        let mut codepoint = match u16::from_str_radix(
+            unsafe { str::from_utf8_unchecked(self.src.slice(start..=self.index)) },
+            16,
+        ) {
+            Ok(v) => v as u32,
+            _ => return 0,
+        };
+
+        if (0xD800..=0xDBFF).contains(&codepoint) {
+            start = self.index + 3;
+
+            self.index += 6;
+            self.src.hint(self.index);
+
+            if self.index >= self.src.len() || self.src.slice(start - 2..start) != br"\u" {
+                self.index -= 6;
+                return 0;
+            }
+
+            let low = match u16::from_str_radix(
+                unsafe { str::from_utf8_unchecked(self.src.slice(start..=self.index)) },
+                16,
+            ) {
+                Ok(v) => v as u32,
+                _ => return 0,
+            };
+
+            if !(0xDC00..=0xDFFF).contains(&low) {
+                return 0;
+            }
+
+            codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (low as u32 - 0xDC00))
+        }
+
+        let mut utf8 = [0u8; 4];
+        let utf8 = match char::from_u32(codepoint) {
+            Some(v) => v.encode_utf8(&mut utf8).as_bytes(),
+            _ => return 0,
+        };
+
+        for (i, v) in utf8.iter().enumerate() {
+            unsafe { buf.add(i).write(*v) }
+        }
+
+        utf8.len()
     }
 
     #[inline(always)]
