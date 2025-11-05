@@ -288,7 +288,7 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
     fn value(&mut self) -> Result<Wrap<Value>, Error> {
         'tmp: {
             return match self.skip_whitespace() {
-                0 => Err(Error::Eof),
+                0 => Err(Error::ExpectedValue),
                 b'"' => self.string(),
                 b'{' => self.object(),
                 b'[' => self.array(),
@@ -465,7 +465,8 @@ impl<'a, S: Source + 'a> Parser<'a, S> {
             let tmp = self.src.unbounded_search([b'"', b'\\'], self.index);
 
             if tmp == 0 {
-                return Err(Error::Eof);
+                unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap()) };
+                return Err(Error::UnclosedString);
             }
 
             self.index = tmp;

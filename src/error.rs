@@ -1,14 +1,18 @@
 /// Represents the type of error that occurred while parsing.
 #[derive(Debug)]
 pub enum Error {
-    /// EOF while parsing.
-    Eof,
     /// Expected the given character but found something else.
     Expected(char),
+    /// Expected value but found EOF instead.
+    ExpectedValue,
     /// Exponent in number not followed by a valid digit.
     ExpectedExponentValue,
     /// Unexpected token while parsing.
     UnexpectedToken,
+    /// String wasn't properly terminated.
+    UnclosedString,
+    /// Found raw control characters inside string while parsing.
+    ControlCharacter,
     /// Invalid escape sequence in string.
     InvalidEscapeSequnce,
     /// Comma after the last value of an array or an object.
