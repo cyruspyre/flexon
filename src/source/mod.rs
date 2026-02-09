@@ -1,80 +1,152 @@
+//! JSON source types and traits for parsing.
+
+mod null_padded;
 mod reader;
-mod slice;
 
-use std::ops::RangeBounds;
+use crate::misc::Sealed;
 
-pub use reader::Reader;
-pub use slice::Slice;
+pub use {null_padded::NullPadded, reader::Reader};
 
-#[allow(unused_imports)]
-use std::borrow::Cow;
-
-/// A trait representing a generic source of bytes for parsing.
+/// Trait representing a source of JSON data for parsing.
+///
+/// This trait abstracts over different input types, allowing the parser to work
+/// with strings, byte slices, and streaming readers uniformly.
 pub trait Source {
-    /// Indicates whether comments returned by the parser can be borrowed (`true`) or must be owned (`false`).
+    /// Whether the source is guaranteed to be valid UTF-8.
     ///
-    /// - If `true`, comment text is returned as [`Cow::Borrowed`] pointing directly into the source slice,
-    ///   avoiding allocations.
-    /// - If `false`, comment text is returned as [`Cow::Owned`], since the source may not live long enough
-    ///   for borrowing.
+    /// When `false`, the parser will validate UTF-8 encoding for JSON string values.
     ///
-    /// For example:
-    /// - [`Slice<'a>`] sets `BORROWED = true` because comments can reference the input slice directly.
-    /// - [`Reader<R>`] sets `BORROWED = false` because comments must be copied from the streaming buffer.
-    const BORROWED: bool;
+    /// Note: Validation is limited to strings only, as invalid UTF-8 elsewhere in the
+    /// JSON will be rejected as an unexpected token during parsing.
+    const UTF8: bool;
 
-    /// Returns the byte at the specified index without performing bounds checking.
+    /// Whether the source allows in-situ (in-place) parsing.
     ///
-    /// This method is used more frequently by the parser than [`Source::get_checked`].
-    /// It assumes that the given index is always valid and will not trigger any reads or errors.
-    fn get(&self, index: usize) -> u8;
+    /// In-situ parsing modifies the source data directly to parse strings. Requires the source to be non volatile as well.
+    const INSITU: bool;
 
-    /// Returns the byte at the given `index`, returning `0` if out of bounds.
+    /// Whether the source is 64 null bytes padded at the end. Allows the parser to skip bounds checking.
     ///
-    /// For streaming sources, this may trigger a read to fetch more data.
-    fn get_checked(&mut self, index: usize) -> u8;
+    /// # Safety
+    ///
+    /// The source must be non volatile. As the parser will store and use the pointer as index.
+    const NULL_PADDED: bool;
 
-    /// Returns a slice of bytes within the specified `range`.
-    ///
-    /// This method should never panic. The range will always be inclusive or exclusive
-    /// and will not be unbounded.
-    fn slice<R: RangeBounds<usize>>(&self, range: R) -> &[u8];
+    /// The volatility of the source.
+    type Volatility: Volatility;
 
-    /// Searches for the first occurrence of either of the given bytes starting from `index`.
+    /// Returns a pointer at the given offset.
     ///
-    /// Returns the index of the match, or `0` if no match is found.
-    /// For streaming sources, this may read additional data as needed.
-    fn unbounded_search<const N: usize>(&mut self, needles: [u8; N], index: usize) -> usize;
+    /// # Safety
+    ///
+    /// The parser ensures the offset is within bounds by checking `len()` beforehand.
+    /// Implementations must not panic.
+    fn ptr(&mut self, offset: usize) -> *const u8;
 
-    /// Marks a "stamp" at the given index, indicating that bytes before this index
-    /// may be discarded or ignored.
+    /// Returns a mutable pointer to the byte at the given offset.
     ///
-    /// This is primarily used to optimize memory usage for sources like `Reader`.
-    /// It can be safely ignored for sources that are fully loaded in memory, like `Slice`.
-    fn stamp(&mut self, stamp: usize);
+    /// This method is used for in-situ parsing. Implementations may return a null pointer
+    /// or use `unimplemented!()`/`unreachable()` if `INSITU` is `false`. The parser only calls this
+    /// method when in-situ parsing conditions are met.
+    ///
+    /// # Safety
+    ///
+    /// The parser ensures the offset is within bounds by checking `len()` beforehand.
+    /// Implementations must not panic.
+    fn ptr_mut(&mut self, offset: usize) -> *mut u8;
 
-    /// Provides a hint that the parser will soon require data up to the given index.
+    /// Signal to discard data up to the given offset (exclusive).
     ///
-    /// Streaming sources may use this to prefetch or buffer additional bytes.
-    /// Otherwise, the parser may return an EOF error. This can be safely ignored for
-    /// sources like `Slice`.
-    fn hint(&mut self, index: usize);
+    /// This method is only called for volatile sources to free memory as data is consumed.
+    fn trim(&mut self, until: usize);
 
-    /// Returns the total length of the source.
+    /// Returns the current length of available source data in bytes.
     ///
-    /// For fixed sources like slices, this is the slice length.
-    /// For streaming sources, this is the total number of bytes read so far.
-    fn len(&self) -> usize;
+    /// The parser requires at least 64 bytes of data to be available during parsing,
+    /// otherwise it may give false EOF-related errors.
+    fn len(&mut self) -> usize;
 }
 
-macro_rules! memchr_n {
-    ($n:expr, $needles:expr, $haystack:expr) => {
-        match $n {
-            1 => memchr::memchr($needles[0], $haystack),
-            2 => memchr::memchr2($needles[0], $needles[1], $haystack),
-            _ => memchr::memchr3($needles[0], $needles[1], $needles[2], $haystack),
-        }
-    };
+/// Marker trait indicating whether a source's data is stable or not.
+///
+/// Sources can be either volatile or non-volatile:
+/// - **Non-volatile**: The entire input is available upfront (e.g., string slices)
+/// - **Volatile**: The input arrives incrementally and may need trimming (e.g., readers)
+pub trait Volatility: Sealed {
+    #[doc(hidden)]
+    const IS_VOLATILE: bool;
 }
 
-pub(crate) use memchr_n;
+/// Marker type for sources whose data may change or be discarded during parsing.
+///
+/// Volatile sources typically represent streaming input where data arrives
+/// incrementally and already-parsed portions may be trimmed to conserve memory.
+pub struct Volatile;
+
+impl Sealed for Volatile {}
+impl Volatility for Volatile {
+    const IS_VOLATILE: bool = true;
+}
+
+/// Marker type for sources whose data remains stable throughout parsing.
+///
+/// Non-volatile sources have all data available upfront and it remains
+/// accessible for the entire duration of parsing.
+pub struct NonVolatile;
+
+impl Sealed for NonVolatile {}
+impl Volatility for NonVolatile {
+    const IS_VOLATILE: bool = false;
+}
+
+impl Source for &str {
+    const UTF8: bool = true;
+    const INSITU: bool = false;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, _: usize) -> *mut u8 {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}
+
+impl Source for &mut str {
+    const UTF8: bool = true;
+    const INSITU: bool = true;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, offset: usize) -> *mut u8 {
+        unsafe { self.as_mut_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}

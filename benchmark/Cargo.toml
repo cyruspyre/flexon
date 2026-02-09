@@ -1,0 +1,43 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+bench = false
+
+[[bench]]
+name = "deserialize_struct"
+harness = false
+
+[[bench]]
+name = "deserialize_value"
+harness = false
+
+[[bench]]
+name = "get_lazy"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+overflow-checks = false
+panic = "abort"
+incremental = false
+
+[dependencies]
+flexon = { version = "*", path = "..", default-features = false, features = [
+    "serde",
+    "prealloc",
+    "simd",
+] }
+serde = "1.0.228"
+serde_json = "1.0.149"
+simd-json = { version = "0.17.0", default-features = false, features = [
+    "serde",
+    "swar-number-parsing",
+] }
+sonic-rs = "0.5.6"
+
+[dev-dependencies]
+criterion = "0.8.1"

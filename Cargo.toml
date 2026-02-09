@@ -1,40 +1,28 @@
 [package]
 name = "flexon"
-version = "0.3.5"
+version = "0.4.0"
 edition = "2024"
-description = "Yet another JSON parser"
+description = "SIMD accelerated JSON parser"
 repository = "https://github.com/cyruspyre/flexon"
 license = "MIT"
-exclude = ["benches/", "data/", ".gitignore"]
+exclude = ["benchmark/", ".gitignore"]
 categories = ["parser-implementations", "parsing"]
-keywords = ["json", "parser", "span"]
+keywords = ["simd", "json", "parser", "span", "comment"]
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[profile.release]
-lto = true
-
-[dev-dependencies]
-criterion = "0.7.0"
-
-[lib]
-bench = false
-
-[[bench]]
-name = "parse"
-harness = false
-
 [features]
-default = ["prealloc"]
+default = ["serde", "prealloc", "runtime-detection"]
+simd = []
 span = []
+nightly = []
 comment = []
 prealloc = []
-line-count = ["comment", "span"]
-serde-json = ["serde_json"]
+serde = ["dep:serde"]
+runtime-detection = ["simd"]
 
 [dependencies]
-serde_json = { version = "1.0.145", optional = true }
-fast-float2 = "0.2.3"
-memchr = "2.7.6"
+serde = { version = "1.0.228", optional = true }
+simdutf8 = "0.1.5"

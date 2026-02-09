@@ -1,77 +1,61 @@
-use std::fmt::Debug;
+use core::fmt::{Debug, Formatter, Result};
 
-#[cfg(feature = "span")]
-use crate::span::Span;
-
-/// Represents a JSON number, stored as either an unsigned integer (`u64`),
-/// signed integer (`i64`), or a float (`f64`).
+/// Represents a JSON number.
+#[repr(transparent)]
 #[derive(Clone, Copy)]
-pub enum Number {
+pub struct Number(Kind);
+
+#[derive(Clone, Copy)]
+pub enum Kind {
     Unsigned(u64),
     Signed(i64),
     Float(f64),
 }
 
-#[cfg(feature = "span")]
-impl Span<Number> {
-    /// Returns the number as `u64`, or `None` if it is not a positive integer.
-    pub fn as_u64(&self) -> Option<Span<u64>> {
-        match self.data {
-            Number::Unsigned(data) => Some(Span {
-                data,
-                start: self.start,
-                end: self.end,
-            }),
-            _ => None,
-        }
-    }
-
-    /// Returns the number as `i64`, or `None` if it is not a negative integer.
-    pub fn as_i64(&self) -> Option<Span<i64>> {
-        match self.data {
-            Number::Signed(data) => Some(Span {
-                data,
-                start: self.start,
-                end: self.end,
-            }),
-            _ => None,
-        }
-    }
-
-    /// Returns the number as `f64`, or `None` if it is not a float.
-    pub fn as_f64(&self) -> Option<Span<f64>> {
-        match self.data {
-            Number::Float(data) => Some(Span {
-                data,
-                start: self.start,
-                end: self.end,
-            }),
-            _ => None,
-        }
-    }
-}
-
 impl Number {
+    /// Creates JSON number from `u64`.
+    #[inline(always)]
+    pub fn from_u64(val: u64) -> Self {
+        Self(Kind::Unsigned(val))
+    }
+
+    /// Creates JSON number from `i64`.
+    #[inline(always)]
+    pub fn from_i64(val: i64) -> Self {
+        Self(Kind::Signed(val))
+    }
+
+    /// Creates JSON number from `f64`.
+    ///
+    /// Returns `None` if the number is infinite or NaN.
+    #[inline]
+    pub fn from_f64(val: f64) -> Option<Self> {
+        match val.is_finite() {
+            true => Some(Self(Kind::Float(val))),
+            _ => None,
+        }
+    }
+
     /// Returns the number as `u64`, or `None` if it is not a positive integer.
     pub fn as_u64(&self) -> Option<u64> {
-        match self {
-            Number::Unsigned(v) => Some(*v),
+        match self.0 {
+            Kind::Unsigned(v) => Some(v),
             _ => None,
         }
     }
 
     /// Returns the number as `i64`, or `None` if it is not a negative integer.
     pub fn as_i64(&self) -> Option<i64> {
-        match self {
-            Number::Signed(v) => Some(*v),
+        match self.0 {
+            Kind::Signed(v) => Some(v),
             _ => None,
         }
     }
 
     /// Returns the number as `f64`, or `None` if it is not a float.
     pub fn as_f64(&self) -> Option<f64> {
-        match self {
-            Number::Float(v) => Some(*v),
+        match self.0 {
+            Kind::Float(v) => Some(v),
             _ => None,
         }
     }
@@ -93,19 +77,11 @@ impl Number {
 }
 
 impl Debug for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            return match self {
-                Self::Unsigned(v) => v.fmt(f),
-                Self::Signed(v) => v.fmt(f),
-                Self::Float(v) => v.fmt(f),
-            };
-        }
-
-        match self {
-            Self::Unsigned(v) => f.debug_tuple("Unsigned").field(v).finish(),
-            Self::Signed(v) => f.debug_tuple("Signed").field(v).finish(),
-            Self::Float(v) => f.debug_tuple("Float").field(v).finish(),
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.0 {
+            Kind::Unsigned(v) => v.fmt(f),
+            Kind::Signed(v) => v.fmt(f),
+            Kind::Float(v) => v.fmt(f),
         }
     }
 }

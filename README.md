@@ -1,87 +1,265 @@
-# flexon [![crates.io](https://img.shields.io/crates/v/flexon.svg)](https://crates.io/crates/flexon)
-A JSON parser with span tracking and optional comment support.
+# flexon
 
-## Example
-For most use cases, all you need is the actual JSON data:
-```rs
-use flexon::parse;
+[![crates.io](https://img.shields.io/crates/v/flexon.svg)](https://crates.io/crates/flexon)
+[![Documentation](https://docs.rs/flexon/badge.svg)](https://docs.rs/flexon)
 
-let src = r#"{"blah": "was it really necessary?"}"#;
-let val: &Span<Value> = parse(src).unwrap()["blah"];
+SIMD accelerated JSON parser with optional comment and span support.
 
-println!("{val:#?} at {}..={}", val.start(), val.end());
-```
-But wait, what about comments? For that you need to enable `comment` feature
-```rs
-use flexon::{Parser, source::Slice};
+## Usage
 
-let src = r#"
-{
-    // A single-line comment
-    "nested": {
-        "one": "hello world"
-    }
+### Comments and spans
+
+Comments are often seen in config files and such. So is the need for span information. There is not much to say about them. Here is an example.
+
+```rust
+use flexon::{Parser, Value, config::CTConfig};
+
+let src = r#"{
+  "server": {
+    // listens on
+    "host": "localhost",
+    "port": 8080,
     /*
-     * A multi-line comment
-     */
-    "mixed": [true, null, 1]
-}
-"#;
+      Cache configuration
+      TTL in seconds
+    */
+    "cache": {
+      "enabled": true,
+      "ttl": 3600,
+    }
+  }
+}"#;
+// here CTConfig means compile time configuration
+// doing niche things like this adds runtime overhead and slows down
+// JSON parsing for general cases. so omitting such unwanted options at compile
+// time saves us from that. you may use RTConfig instead if you want.
+let config = CTConfig::new().allow_trailing_comma().allow_comments();
+let mut parser = Parser::from_str(src).with_config(config);
+let val: Value = parser.parse().ok()?;
 
-let parser = Parser::new(
-    Slice::from(src),
-    false, // Require commas
-    false, // Allow trailing commas (has no effect when commas are optional)
+println!(
+    "The server{} port {:?}",
+    parser.take_comments()[0],
+    val["server"]["port"]
 );
-let (_, comments) = parser.parse().unwrap();
-let (cmnt, is_multi_line) = comments[0].data();
-
-println!("{cmnt:?}");
-assert!(!is_multi_line);
-
-let (cmnt, is_multi_line) = comments[1].data();
-
-println!("{cmnt:?}");
-assert!(is_multi_line);
-
-// Index 11 falls within the single-line comment's range.
-assert!(comments.find_comment(11).is_some());
-
-// With the `line-count` feature enabled, you can find a comment by its line index.
-// In that case, the parser returns `Metadata` instead of `Vec<..>`.
-assert!(comments.find_comment_by_line(7).is_some());
 ```
+
+Note: serde APIs don't support span information as of right now. However, comments and configurations are available.
+
+### Parsing only a portion of JSON
+
+There might be cases where you want to parse only a portion of the JSON. Say no more, you can do them quite easily. It is faster to do so than parsing the whole thing and getting the value you want. Given, you don't care about the trailing data. There are both checked and unchecked APIs for this. The former will validate the JSON as it goes forward and return early once the value has been parsed. As such the trailing data is ignored.
+
+```rust
+use flexon::jsonp;
+
+#[derive(Deserialize)]
+struct Customer {
+    name: String,
+    email: String,
+}
+
+let src = r#"{
+  "order": {
+    "id": 1001,
+    "items": [
+      {
+        "name": "Stuff",
+        "price": 29.99
+      }
+    ],
+    "customer": {
+      "name": "Walter White",
+      "email": "dummy@example.com"
+    }
+  }
+}"#;
+let customer: Customer = flexon::get_from(src, ["order", "customer"])?;
+let item_price: f64 = flexon::get_from(src, jsonp!["order", "items", 0, "price"])?;
+
+println!("{} bought an item that costs {}!!", customer.name, item_price);
+```
+
+### Lazy values and raw numbers
+
+If you need JSON values to be parsed lazily, then they are available. Nothing is parsed until they are queried/accessed (They are actually parsed and validated but not materialized). As a side effect, you can get raw numbers using them.
 
 ## Features
 
-`comment`: Enable comment parsing. The performance overhead is significant.
+`simd` (default): Enables hardware specific SIMD. Things like SWAR will still be used even if it is disabled. On `x86_64`, SSE2 is used regardless of this flag as it is a baseline feature.
 
-`line-count`: Include line information and allow searching comments by line index. Performance overhead is somewhat minimal.
+`runtime-detection` (default): As of right now, it is used only for unchecked skipping APIs. Wider registers like AVX2 benefits in those cases. Can be disabled safely.
 
-`prealloc` (default): Pre-allocate memory for array/object when parsing based on the length of previously parsed array/object. Can improve performance at the cost of potentially increased/reduced memory usage. Works particularly well when the JSON has a relatively uniform and repetitive structure. This can also become an overhead if you use a custom allocator like [`snmalloc`](https://crates.io/crates/snmalloc-rs), [`mimalloc`](https://crates.io/crates/mimalloc) or [`jemalloc`](https://crates.io/crates/tikv-jemallocator) instead.
+`comment`: Enables comment parsing. Follows JSONC specification.
 
-`span`: Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%.
+`prealloc` (default): Pre-allocates object/array based on its previous length. Has no effect in serde APIs. This is pretty niche but works well when the object/array is uniform. Might become an overhead instead when using custom allocators.
 
-`serde-json`: Implements `Into<serde_json::Value>` for `flexon::Value`.
+`span`: Enables span information on the parsed JSON data. Performance overhead is minimal. Not available in lazy value and serde APIs.
 
-## Performance
-This was created solely for parsing JSON with span support and comments, so it has overhead than other crates like [`serde-json`](https://crates.io/crates/serde_json), [`jzon`](https://crates.io/crates/jzon) or [`simd-json`](https://crates.io/crates/simd-json). The performance is somewhat close to [`serde-json`](https://crates.io/crates/serde_json) or sometimes even better, depending on the case. For reference, here are their benchmark on x86_64:
+`serde` (default): Implements serde specific APIs. Serialization not available. Probably in the future.
+
+`nightly`: Uses nightly features. Currently only `likely_unlikely` and `cold_path` are used.
+
+# Performance
+
+The below benchmarks are run on an `x86_64` platform with `RUSTFLAGS="-C target-cpu=native"`. Respective crate's runtime detection features are also disabled.
+
+## Deserialize Typed
+
+This parses JSON into Rust struct using serde API. `Cow<str>` is used for string types. Here both `simd_json` and the ones with `mut` signature in their function perform in-situ parsing. As such, they can avoid heap allocation for strings even if they contain escape characters.
+
+`cargo bench --bench deserialize_struct`
+
 ```
-serde-json:
-  canada        14.29 ms  140.14 MiB/s
-  twitter        2.40 ms  250.67 MiB/s
-  citm_catalog   4.21 ms  390.89 MiB/s
+twitter:
+    flexon::from_mut_str           480.07 µs   1.2251 GiB/s
+    flexon::from_mut_null_padded   506.95 µs   1.1602 GiB/s
+    flexon::from_str               551.13 µs   1.0672 GiB/s
+    sonic_rs::from_str             560.91 µs   1.0486 GiB/s
+    flexon::from_null_padded       586.29 µs   1.0032 GiB/s
+    simd_json::from_str            698.88 µs   861.75 MiB/s
+    serde_json::from_str           837.95 µs   718.73 MiB/s
 
-flexon:
-  canada        10.67 ms  201.05 MiB/s
-  twitter        2.42 ms  247.94 MiB/s
-  citm_catalog   3.97 ms  414.85 MiB/s
+citm_catalog:
+    flexon::from_null_padded       966.19 µs   1.6649 GiB/s
+    flexon::from_str               967.31 µs   1.6630 GiB/s
+    flexon::from_mut_null_padded   971.29 µs   1.6561 GiB/s
+    flexon::from_mut_str           971.97 µs   1.6550 GiB/s
+    sonic_rs::from_str             1.2714 ms   1.2652 GiB/s
+    serde_json::from_str           1.9147 ms   860.29 MiB/s
+    simd_json::from_str            1.9293 ms   853.76 MiB/s
 
-flexon (without span):
-  canada         9.90 ms  216.67 MiB/s
-  twitter        2.35 ms  256.18 MiB/s
-  citm_catalog   3.92 ms  420.09 MiB/s
+canada:
+    flexon::from_null_padded       2.6039 ms   824.45 MiB/s
+    flexon::from_mut_null_padded   2.6229 ms   818.48 MiB/s
+    flexon::from_str               2.8673 ms   748.70 MiB/s
+    flexon::from_mut_str           2.9453 ms   728.87 MiB/s
+    sonic_rs::from_str             3.2038 ms   670.07 MiB/s
+    serde_json::from_str           3.6377 ms   590.15 MiB/s
+    simd_json::from_str            5.0673 ms   423.65 MiB/s
+
+github_events:
+    flexon::from_str               60.949 µs   1.0191 GiB/s
+    flexon::from_mut_str           63.843 µs   972.93 MiB/s
+    simd_json::from_str            71.653 µs   866.88 MiB/s
+    flexon::from_mut_null_padded   68.483 µs   907.01 MiB/s
+    flexon::from_null_padded       71.110 µs   873.50 MiB/s
+    sonic_rs::from_str             79.947 µs   776.95 MiB/s
+    serde_json::from_str           98.387 µs   631.33 MiB/s
 ```
-Even though it can parse standard, strict JSON, you shouldn’t use it for that unless you need to parse JSON with comments or span support. Don’t torture yourself and just use one of the faster crates mentioned earlier. Fyi, this crate is faster than others that serve a somewhat similar purpose. *Source?* **Trust me, bro.**
 
-Other similar crates: [`spanned-json-parser`](https://crates.io/crates/spanned_json_parser) | [`jsonc-parser`](https://crates.io/crates/jsonc-parser)
+Parsing JSON from a streaming source. `sonic_rs` and `simd_json` are excluded as they read the whole source before parsing.
+
+`cargo bench --bench deserialize_struct "from_reader"`
+
+```
+twitter:
+    flexon::from_reader            2.1314 ms   282.57 MiB/s
+    serde_json::from_reader        3.1992 ms   188.25 MiB/s
+
+citm_catalog:
+    flexon::from_reader            4.1157 ms   400.22 MiB/s
+    serde_json::from_reader        5.4789 ms   300.64 MiB/s
+
+canada:
+    serde_json::from_reader        7.6590 ms   280.29 MiB/s
+    flexon::from_reader            10.440 ms   205.63 MiB/s
+
+github_events:
+    flexon::from_reader            341.73 µs   181.76 MiB/s
+    serde_json::from_reader        362.35 µs   171.42 MiB/s
+```
+
+## Deserialize Untyped
+
+Crate APIs that are able to parse JSON without using serde API. Note that even though `sonic_rs` uses serde API, it still does its own things in the implementation.
+
+`cargo bench --bench deserialize_value "value"`
+
+```
+twitter:
+    sonic_rs::from_slice           356.27 µs   1.6508 GiB/s
+    flexon::from_slice             691.11 µs   871.44 MiB/s
+    simd_json::to_borrowed_value   1.0280 ms   585.85 MiB/s
+
+citm_catalog:
+    sonic_rs::from_slice           960.23 µs   1.6752 GiB/s
+    flexon::from_slice             1.6369 ms   1006.3 MiB/s
+    simd_json::to_borrowed_value   3.0852 ms   533.91 MiB/s
+
+canada:
+    sonic_rs::from_slice           2.9747 ms   721.67 MiB/s
+    flexon::from_slice             6.6070 ms   324.92 MiB/s
+    simd_json::to_borrowed_value   8.4256 ms   254.79 MiB/s
+```
+
+Deserializes into JSON value using `serde_json::Value` as a common ground.
+
+`cargo bench --bench deserialize_value "common"`
+
+```
+twitter:
+    sonic_rs::from_slice           2.0770 ms   289.96 MiB/s
+    flexon::from_slice             2.0903 ms   288.12 MiB/s
+    simd_json::from_slice          2.2492 ms   267.76 MiB/s
+    serde_json::from_slice         2.9100 ms   206.96 MiB/s
+
+citm_catalog:
+    flexon::from_slice             2.9417 ms   559.94 MiB/s
+    sonic_rs::from_slice           3.3677 ms   489.11 MiB/s
+    simd_json::from_slice          4.3780 ms   376.24 MiB/s
+    serde_json::from_slice         4.6329 ms   355.54 MiB/s
+
+canada:
+    flexon::from_slice             12.253 ms   175.21 MiB/s
+    simd_json::from_slice          12.990 ms   165.26 MiB/s
+    sonic_rs::from_slice           13.231 ms   162.25 MiB/s
+    serde_json::from_slice         13.417 ms   160.00 MiB/s
+```
+
+### Lazy Value
+
+JSON values that are built lazily but still perform validation while parsing.
+
+`cargo bench --bench deserialize_value "lazy"`
+
+```
+twitter:
+    sonic_rs::from_slice           284.59 µs   2.0667 GiB/s
+    flexon::from_slice             293.04 µs   2.0071 GiB/s
+    simd_json::to_tape             516.89 µs   1.1379 GiB/s
+
+citm_catalog:
+    sonic_rs::from_slice           617.59 µs   2.6046 GiB/s
+    flexon::from_slice             660.92 µs   2.4339 GiB/s
+    simd_json::to_tape             1.4192 ms   1.1335 GiB/s
+
+canada:
+    sonic_rs::from_slice           1.4288 ms   1.4673 GiB/s
+    flexon::from_slice             2.9298 ms   732.74 MiB/s
+    simd_json::to_tape             4.5479 ms   472.03 MiB/s
+```
+
+Getting items from lazy values. There was lifetime issue so `simd_json` is excluded. Here the ones with the pointer tag use their respective JSON Pointer like APIs as a one time access/query to a certain field. Both `flexon` and `sonic_rs` in this case don't cache anything. Finally the ones without the tag are performing subsequent access to nearby fields. Unlike `sonic_rs`, `flexon` will store the accessed values for later use.
+
+`cargo bench --bench get_lazy`
+
+```
+twitter:
+    sonic_rs::get_lazy (pointer)   46.510 µs   12.646 GiB/s
+    flexon::get_lazy (pointer)     50.658 µs   11.610 GiB/s
+    flexon::get_lazy               104.56 µs   5.6251 GiB/s
+    sonic_rs::get_lazy             364.78 µs   1.6123 GiB/s
+
+citm_catalog:
+    sonic_rs::get_lazy (pointer)   143.37 µs   11.220 GiB/s
+    flexon::get_lazy (pointer)     181.61 µs   8.8574 GiB/s
+    flexon::get_lazy               355.75 µs   4.5217 GiB/s
+    sonic_rs::get_lazy             819.43 µs   1.9631 GiB/s
+
+canada:
+    sonic_rs::get_lazy (pointer)   315.34 µs   6.6483 GiB/s
+    flexon::get_lazy (pointer)     348.53 µs   6.0152 GiB/s
+    flexon::get_lazy               422.89 µs   4.9575 GiB/s
+    sonic_rs::get_lazy             6.0449 ms   355.14 MiB/s
+```

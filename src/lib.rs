@@ -1,115 +1,84 @@
+#![cfg_attr(feature = "nightly", feature(likely_unlikely, cold_path))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![allow(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::std_instead_of_core)]
+#![doc = include_str!("../README.md")]
 
-//! # flexon
-//!
-//! A JSON parser with span tracking and optional comment support.
-//!
-//! ## Example
-//!
-//! ```rust
-//! use flexon::parse;
-//!
-//! let src = r#"{"blah": "was it really necessary?"}"#;
-//! let val = &parse(src).unwrap()["blah"];
-//!
-//! println!("{val:#?} at {}..={}", val.start(), val.end());
-//! ```
-//!
-//! For more examples and performance benchmarks, see the [README](https://crates.io/crates/flexon).
-//!
-//! ## Features
-//!
-//! - **`comment`** - Enable comment parsing. The performance overhead is significant
-//! - **`line-count`** - Include line information and allow searching comments by line index. Performance overhead is somewhat minimal
-//! - **`prealloc`** *(default)* - Pre-allocate memory when parsing for faster performance, with possible memory trade-offs
-//! - **`span`** - Include span information on the parsed JSON data. Performance overhead is minimal and memory usage will increase roughly by 33%
-//! - **`serde-json`**: Implements `Into<serde_json::Value>` for `flexon::Value`
-
-use crate::source::Slice;
-#[doc(inline)]
-pub use crate::{error::Error, parser::Parser, value::Value};
-
-#[cfg(all(feature = "comment", feature = "span"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "comment", feature = "span"))))]
-pub use find_comment::FindComment;
-
+#[cfg(feature = "serde")]
+pub mod serde;
 #[cfg(feature = "span")]
-#[cfg_attr(docsrs, doc(cfg(feature = "span")))]
-pub use crate::span::Span;
+pub mod span;
 
-#[cfg(feature = "line-count")]
-mod metadata;
-
-#[cfg(all(feature = "comment", feature = "span"))]
-mod find_comment;
-
-#[cfg(feature = "span")]
-mod span;
-
+#[cfg(feature = "comment")]
+mod comment;
+pub mod config;
 mod error;
+mod fast_float;
 mod misc;
 mod parser;
+pub mod pointer;
+mod simd;
 pub mod source;
 pub mod value;
 
-#[cfg(feature = "span")]
-type Wrap<T> = Span<T>;
+use crate::{pointer::JsonPointer, source::Source, value::builder::ValueBuilder};
 
-#[cfg(not(feature = "span"))]
-type Wrap<T> = T;
+#[doc(inline)]
+pub use {
+    error::Error,
+    parser::Parser,
+    value::{LazyValue, Value},
+};
 
-#[cfg(feature = "span")]
-macro_rules! wrap {
-    ($t:ty) => {
-        Span<$t>
-    };
-}
+#[doc(inline)]
+#[cfg(feature = "serde")]
+pub use serde::{
+    from_mut_null_padded, from_mut_slice, from_mut_slice_unchecked, from_mut_str, from_null_padded,
+    from_reader, from_reader_unchecked, from_slice, from_slice_unchecked, from_str, get_from,
+    get_from_unchecked,
+};
 
-#[cfg(not(feature = "span"))]
-macro_rules! wrap {
-    ($t:ty) => {
-        $t
-    };
-}
+#[cfg(feature = "comment")]
+pub use comment::Comment;
 
-pub(crate) use wrap;
-
-/// Parses JSON with custom parsing options.
+/// Parses a JSON source into the specified type.
 ///
-/// # Arguments
-///
-/// - `src`: The JSON source to parse.
-/// - `comma`: Whether to require commas while parsing.
-/// - `trailing_comma`: Whether trailing commas are allowed (has no effect when commas are optional).
+/// This is a convenience function that creates a parser with default configuration
+/// and immediately parses the input. It is equivalent to `Parser::new(src).parse()`.
 ///
 /// # Example
-///
-/// ```rust
-/// use flexon::parse_with;
-///
-/// let src = r#"{"numbers": [1, 2,]}"#;
-/// let value = parse_with(src, true, true).unwrap();
 /// ```
-pub fn parse_with(
-    src: &str,
-    comma: bool,
-    trailing_comma: bool,
-) -> Result<wrap!(Value), wrap!(Error)> {
-    Parser::new(Slice::from(src), comma, trailing_comma).parse()
+/// use flexon::{Value, parse};
+///
+/// let json = r#"{"width": 20, "height": 50}"#;
+/// let value: Value<'_> = parse(json)?;
+/// # Ok::<(), flexon::Error>(())
+/// ```
+#[inline]
+pub fn parse<'a, S: Source, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::Error> {
+    Parser::new(s).parse()
 }
 
-/// Parses JSON with default parsing options.
+/// Skips to the given path and parses JSON into the specified type.
 ///
-/// This is equivalent to calling `flexon::parse_with(src, true, false)`.
+/// This is a convenience function that creates a parser with default configuration
+/// and immediately parses the input. It is equivalent to `Parser::new(src).parse_at(path)`.
 ///
 /// # Example
-///
-/// ```rust
-/// use flexon::parse;
-///
-/// let src = r#"{"message": "Hello, world!"}"#;
-/// let value = parse(src).unwrap();
 /// ```
-pub fn parse(src: &str) -> Result<wrap!(Value), wrap!(Error)> {
-    parse_with(src, true, false)
+/// use flexon::{Value, parse_at};
+///
+/// let json = r#"{"width": 20, "height": 50}"#;
+/// let value: Value<'_> = parse_at(json, ["height"])?;
+/// # Ok::<(), flexon::Error>(())
+/// ```
+#[inline]
+pub fn parse_at<'a, S, V, P>(s: S, p: P) -> Result<V, V::Error>
+where
+    S: Source,
+    V: ValueBuilder<'a, S>,
+    P: IntoIterator,
+    P::Item: JsonPointer,
+{
+    Parser::new(s).parse_at(p)
 }
