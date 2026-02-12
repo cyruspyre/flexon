@@ -9,8 +9,6 @@ pub const NUM_LUT: [bool; 256] = {
 
     tmp[b'-' as usize] = true;
     tmp[b'.' as usize] = true;
-    tmp[b'e' as usize] = true;
-    tmp[b'E' as usize] = true;
 
     tmp
 };
@@ -56,18 +54,6 @@ pub const NON_LIT_LUT: [bool; 256] = {
     tmp[b'\t' as usize] = true;
     tmp[b'\n' as usize] = true;
     tmp[b'\r' as usize] = true;
-
-    tmp
-};
-
-pub const EXCLUDED: [bool; 256] = {
-    let mut tmp = [false; 256];
-
-    tmp[0] = true;
-    tmp[b':' as usize] = true;
-    tmp[b',' as usize] = true;
-    tmp[b'}' as usize] = true;
-    tmp[b']' as usize] = true;
 
     tmp
 };

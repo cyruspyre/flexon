@@ -61,16 +61,6 @@ macro_rules! bench {
                     )
                 });
 
-                group.bench_with_input("flexon::from_slice", &src, |b, src| {
-                    b.iter_batched(
-                        || src,
-                        |src| {
-                            flexon::from_slice::<$type>(src.as_bytes()).unwrap();
-                        },
-                        BatchSize::SmallInput
-                    )
-                });
-
                 group.bench_with_input("sonic_rs::from_str", &src, |b, src| {
                     b.iter_batched(
                         || src,
@@ -81,31 +71,11 @@ macro_rules! bench {
                     )
                 });
 
-                group.bench_with_input("sonic_rs::from_slice", &src, |b, src| {
-                    b.iter_batched(
-                        || src,
-                        |src| {
-                            sonic_rs::from_slice::<$type>(src.as_bytes()).unwrap();
-                        },
-                        BatchSize::SmallInput
-                    )
-                });
-
                 group.bench_with_input("serde_json::from_str", &src, |b, src| {
                     b.iter_batched(
                         || src,
                         |src| {
                             serde_json::from_str::<$type>(src).unwrap();
-                        },
-                        BatchSize::SmallInput
-                    )
-                });
-
-                group.bench_with_input("serde_json::from_slice", &src, |b, src| {
-                    b.iter_batched(
-                        || src,
-                        |src| {
-                            serde_json::from_slice::<$type>(src.as_bytes()).unwrap();
                         },
                         BatchSize::SmallInput
                     )

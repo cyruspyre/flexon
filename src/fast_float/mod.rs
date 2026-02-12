@@ -87,6 +87,17 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             }
 
             n_digits -= 19;
+            let mut idx = start;
+            while (S::NULL_PADDED || idx != self.src.len()) && n_digits != 0 {
+                match *self.src.ptr(idx) {
+                    v @ (b'.' | b'0') => {
+                        // decrement when its '0'
+                        n_digits -= (v - b'.') as usize >> 1;
+                        idx += 1;
+                    }
+                    _ => break,
+                }
+            }
 
             let mut many_digits = false;
             if n_digits != 0 {
@@ -127,7 +138,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         if am.power2 < 0 {
-            am = self.parse_long_mantissa(start)
+            am = self.parse_long_mantissa(start - neg as usize)
         }
 
         let mut word = am.mantissa;

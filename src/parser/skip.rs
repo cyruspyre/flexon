@@ -5,17 +5,12 @@ use crate::{Parser, config::Config, misc::*, source::Source, value::builder::Err
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline]
     pub(crate) fn skip_value<E: ErrorBuilder>(&mut self) -> Result<(), E> {
-        unsafe {
-            match self.skip_whitespace() {
-                b'"' => self.skip_string(),
-                b'{' => self.skip_object(),
-                b'[' => self.skip_array(),
-                v if unlikely(EXCLUDED[v as usize]) => Err(match v {
-                    0 => E::expected_value(),
-                    _ => E::unexpected_token(),
-                }),
-                _ => self.skip_literal(),
-            }
+        match self.skip_whitespace() {
+            b'"' => self.skip_string(),
+            b'{' => self.skip_object(),
+            b'[' => self.skip_array(),
+            0 => Err(E::expected_value()),
+            _ => unsafe { self.skip_literal() },
         }
     }
 
@@ -81,8 +76,13 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
 
         let err = loop {
-            self.dec();
-            self.skip_value()?;
+            match tmp {
+                b'"' => self.skip_string(),
+                b'{' => self.skip_object(),
+                b'[' => self.skip_array(),
+                0 => return Err(E::eof()),
+                _ => unsafe { self.skip_literal() },
+            }?;
             tmp = self.skip_whitespace();
             let comma = tmp == b',';
 
@@ -244,7 +244,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             if unlikely(
-                (S::NULL_PADDED || self.idx() != self.src.len()) && !NUM_LUT[self.cur() as usize],
+                !S::NULL_PADDED && self.idx() == self.src.len() || !NUM_LUT[self.cur() as usize],
             ) {
                 return Err(E::invalid_literal());
             }
@@ -259,9 +259,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             let start = self.idx();
             let (val, is_int) = self.parse_u64();
 
-            if is_int && (!neg || val < 9223372036854775809) {
+            if is_int {
                 self.dec();
-                return Ok(());
+                if !neg || val < 9223372036854775809 {
+                    return Ok(());
+                }
             }
 
             if start == self.idx() {
@@ -311,7 +313,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub(crate) fn skip_literal_unchecked(&mut self) {
         loop {
             self.inc(1);
-            if NON_LIT_LUT[self.cur() as usize] {
+            if (!S::NULL_PADDED && self.idx() >= self.src.len()) || NON_LIT_LUT[self.cur() as usize]
+            {
                 self.dec();
                 return;
             }

@@ -36,8 +36,10 @@ pub struct Parser<'a, S: Source, C: Config = CTConfig> {
     __: PhantomData<&'a ()>,
 }
 
+// represents the current byte offset.
 union Cur {
     idx: usize,
+    // "pinned" pointer from non volatile source.
     ptr: *mut u8,
 }
 
@@ -139,7 +141,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             self.skip_value()?;
             Ok(unsafe { V::raw(from_raw_parts(self.src.ptr(0), self.src.len())) })
         } else {
-            self.value::<V>()
+            self.value()
         }
     }
 
@@ -212,10 +214,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     b'"' => self.skip_string(),
                     b'{' => self.skip_object(),
                     b'[' => self.skip_array(),
-                    _ if unlikely(EXCLUDED[char as usize]) => Err(match char {
-                        0 => V::Error::expected_value(),
-                        _ => V::Error::unexpected_token(),
-                    }),
+                    0 => return Err(V::Error::expected_value()),
                     _ => self.skip_literal(),
                 }?;
 
@@ -228,13 +227,9 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     b'"' => self.string::<_, V::String, _>(),
                     b'{' => self.object::<_, V::Object, _>(),
                     b'[' => self.array(),
-                    v if unlikely(EXCLUDED[v as usize]) => {
+                    0 => {
                         #[allow(unused_mut)]
-                        let mut tmp = match v {
-                            0 => V::Error::expected_value(),
-                            _ => V::Error::unexpected_token(),
-                        };
-
+                        let mut tmp = V::Error::expected_value();
                         #[cfg(feature = "span")]
                         tmp.apply_span(self.idx(), self.idx());
                         Err(tmp)
@@ -401,7 +396,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     #[cfg(feature = "comment")]
     fn comment(&mut self) {
-        // i dont think it worth adding simd here
+        // i dont think its worth adding simd here
         if match S::NULL_PADDED {
             true => unsafe { *self.cur_ptr().add(1) == 0 },
             _ => self.idx() + 1 == self.src.len(),
@@ -479,16 +474,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         unsafe {
             match self.skip_whitespace() {
                 b'"' => self.string::<_, V::String, V::Error>(),
-                // workaround for (false?) `overflow evaluating the requirement ...` error
-                b'{' => (Self::object::<_, V::Object, V::Error> as unsafe fn(_) -> _)(self),
+                b'{' => self.object::<_, V::Object, V::Error>(),
                 b'[' => self.array(),
-                v if unlikely(EXCLUDED[v as usize]) => {
+                0 => {
                     #[allow(unused_mut)]
-                    let mut tmp = match v {
-                        0 => V::Error::expected_value(),
-                        _ => V::Error::unexpected_token(),
-                    };
-
+                    let mut tmp = V::Error::expected_value();
                     #[cfg(feature = "span")]
                     tmp.apply_span(self.idx(), self.idx());
                     Err(tmp)
@@ -499,8 +489,9 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[allow(unused_mut)]
-    unsafe fn object<T: ValueBuilder<'a, S>, V, E>(&mut self) -> Result<T, E>
+    unsafe fn object<T, V, E>(&mut self) -> Result<T, E>
     where
+        T: ValueBuilder<'a, S>,
         V: ObjectBuilder<'a, S, E> + Into<T>,
         E: ErrorBuilder,
     {
@@ -590,8 +581,19 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
 
         let mut err = loop {
-            self.dec();
-            arr.on_value(self.value()?);
+            arr.on_value(match tmp {
+                b'"' => self.string::<_, V::String, _>(),
+                b'{' => self.object::<_, V::Object, _>(),
+                b'[' => self.array(),
+                0 => {
+                    #[allow(unused_mut)]
+                    let mut err = V::Error::eof();
+                    #[cfg(feature = "span")]
+                    err.apply_span(self.idx(), self.idx());
+                    return Err(err);
+                }
+                _ => self.literal(),
+            }?);
             tmp = self.skip_whitespace();
             let comma = tmp == b',';
 
@@ -797,11 +799,30 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[allow(unused_mut)]
     unsafe fn literal<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         if V::CUSTOM_LITERAL {
+            const EXCLUDED: [bool; 256] = {
+                let mut tmp = [false; 256];
+
+                tmp[b':' as usize] = true;
+                tmp[b',' as usize] = true;
+                tmp[b'}' as usize] = true;
+                tmp[b']' as usize] = true;
+
+                tmp
+            };
+
+            if EXCLUDED[self.cur() as usize] {
+                #[allow(unused_mut)]
+                let mut tmp = V::Error::unexpected_token();
+                #[cfg(feature = "span")]
+                tmp.apply_span(self.idx(), self.idx());
+                return Err(tmp);
+            }
+
             let start = self.idx();
             let end = loop {
                 self.inc(1);
 
-                if (S::NULL_PADDED || self.idx() >= self.src.len())
+                if (!S::NULL_PADDED && self.idx() >= self.src.len())
                     || NON_LIT_LUT[self.cur() as usize]
                 {
                     self.dec();
@@ -827,7 +848,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             if unlikely(
-                (S::NULL_PADDED || self.idx() != self.src.len()) && !NUM_LUT[self.cur() as usize],
+                !S::NULL_PADDED && self.idx() == self.src.len() || !NUM_LUT[self.cur() as usize],
             ) {
                 let mut tmp = V::Error::invalid_literal();
                 #[cfg(feature = "span")]
@@ -850,6 +871,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             'int: {
                 if is_int {
+                    self.dec();
                     let mut tmp = if neg {
                         if val > 9223372036854775808 {
                             break 'int;
@@ -860,7 +882,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         V::integer(val, false)
                     };
 
-                    self.dec();
                     #[cfg(feature = "span")]
                     tmp.apply_span(stamp, self.idx());
                     return Ok(tmp);
@@ -996,6 +1017,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             self.inc(1);
         }
 
+        self.dec();
         (val, false)
     }
 }

@@ -11,10 +11,10 @@ use std::alloc::{alloc, dealloc};
 pub struct Comment<'a> {
     owned: bool,
     multi: bool,
-    #[cfg(feature = "span")]
-    span: [usize; 2],
     buf: *mut u8,
     len: usize,
+    #[cfg(feature = "span")]
+    span: [usize; 2],
     __: PhantomData<&'a ()>,
 }
 
@@ -30,17 +30,19 @@ impl<'a> Comment<'a> {
         Self {
             buf: match owned {
                 true => unsafe {
+                    // no need to check for `len != 0` as owned is true
+                    // only when the source is volatile and the comment is non empty.
                     let tmp = alloc(Layout::array::<u8>(len).unwrap_unchecked());
                     tmp.copy_from_nonoverlapping(src, len);
                     tmp
                 },
                 _ => src,
             },
+            len,
             owned,
             multi,
             #[cfg(feature = "span")]
             span,
-            len,
             __: PhantomData,
         }
     }
@@ -82,7 +84,9 @@ impl<'a> Comment<'a> {
     /// Consumes the comment and converts it into [`String`].
     pub fn into_string(self) -> String {
         unsafe {
-            let buf = if self.owned {
+            // there might be cases like `/**/` where the comment is empty.
+            // so we check length here to avoid allocating 0 bytes.
+            let buf = if self.owned || self.len == 0 {
                 self.buf
             } else {
                 let tmp = alloc(Layout::array::<u8>(self.len).unwrap_unchecked());
@@ -110,6 +114,8 @@ impl Display for Comment<'_> {
 impl Drop for Comment<'_> {
     fn drop(&mut self) {
         if self.owned {
+            // no need to check for `len != 0` as owned is true
+            // only when the source is volatile and the comment is non empty.
             unsafe { dealloc(self.buf, Layout::array::<u8>(self.len).unwrap_unchecked()) }
         }
     }

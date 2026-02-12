@@ -333,6 +333,9 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
     }
 
+    /// This function is used for matching against object key when using
+    /// `parse_at_unchecked` and materializing lazy value.
+    /// Validation is not required.
     pub(crate) fn string_unchecked2(&mut self) -> String<'a> {
         let mut offset = self.idx() + 1;
         let mut buf = dangling_mut();

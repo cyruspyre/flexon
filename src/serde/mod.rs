@@ -25,7 +25,7 @@ use simdutf8::basic::from_utf8;
 use crate::{
     Parser,
     config::Config,
-    misc::{ESC_LUT, EXCLUDED, NUM_LUT, unlikely},
+    misc::{ESC_LUT, NUM_LUT, unlikely},
     pointer::JsonPointer,
     serde::{error::Kind, unchecked::Unchecked},
     source::{NullPadded, Source, Volatility},
@@ -71,7 +71,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             }
 
             if unlikely(
-                (S::NULL_PADDED || self.idx() != self.src.len()) && !NUM_LUT[self.cur() as usize],
+                !S::NULL_PADDED && self.idx() == self.src.len() || !NUM_LUT[self.cur() as usize],
             ) {
                 return Err(Kind::InvalidLiteral.into());
             }
@@ -88,7 +88,8 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
             'int: {
                 if is_int {
-                    let tmp = if neg {
+                    self.dec();
+                    return if neg {
                         if val > 9223372036854775808 {
                             break 'int;
                         }
@@ -97,9 +98,6 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                     } else {
                         visitor.visit_u64(val)
                     };
-
-                    self.dec();
-                    return tmp;
                 }
             }
 
@@ -167,11 +165,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             b'"' => self.deserialize_str(visitor),
             b'{' => self.deserialize_map(visitor),
             b'[' => self.deserialize_seq(visitor),
-            v if unlikely(EXCLUDED[v as usize]) => Err(match v {
-                0 => Kind::Eof,
-                _ => Kind::UnexpectedToken,
-            }
-            .into()),
+            0 => Err(Kind::Eof.into()),
             _ => unsafe { self.parse_literal(visitor) },
         }
     }

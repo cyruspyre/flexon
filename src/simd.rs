@@ -25,12 +25,22 @@ const HIGH: u64 = 0x8080_8080_8080_8080;
 pub fn simd_u64(ptr: *const u8) -> Option<u64> {
     // https://lemire.me/blog/2022/01/21/swar-explained-parsing-eight-digits/
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "ssse3", feature = "simd"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "ssse3",
+        feature = "simd",
+        not(feature = "runtime-detection")
+    ))]
     unsafe {
         ssse3_u64(ptr)
     }
 
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "ssse3", feature = "simd")))]
+    #[cfg(not(all(
+        target_arch = "x86_64",
+        target_feature = "ssse3",
+        feature = "simd",
+        not(feature = "runtime-detection")
+    )))]
     swar_u64(ptr)
 }
 
@@ -74,7 +84,7 @@ fn swar_u64(ptr: *const u8) -> Option<u64> {
     const MUL2: u64 = 0x0000271000000001;
 
     let mut chunk = unsafe { ptr.cast::<u64>().read_unaligned() };
-    if chunk & (chunk + 0x0606060606060606) & 0xF0F0F0F0F0F0F0F0 != ZERO {
+    if chunk & chunk.wrapping_add(0x0606060606060606) & 0xF0F0F0F0F0F0F0F0 != ZERO {
         return None;
     }
 
@@ -89,7 +99,12 @@ fn swar_u64(ptr: *const u8) -> Option<u64> {
 }
 
 #[inline(always)]
-#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq", feature = "simd"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "pclmulqdq",
+    feature = "simd",
+    not(feature = "runtime-detection")
+))]
 unsafe fn compute_inside_mask(mask: u64) -> u64 {
     _mm_cvtsi128_si64(_mm_clmulepi64_si128(
         _mm_set_epi64x(0, mask as _),
@@ -99,7 +114,12 @@ unsafe fn compute_inside_mask(mask: u64) -> u64 {
 }
 
 #[inline(always)]
-#[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq", feature = "simd")))]
+#[cfg(not(all(
+    target_arch = "x86_64",
+    target_feature = "pclmulqdq",
+    feature = "simd",
+    not(feature = "runtime-detection")
+)))]
 fn compute_inside_mask(mut mask: u64) -> u64 {
     mask ^= mask << 1;
     mask ^= mask << 2;
@@ -130,10 +150,18 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub(crate) fn simd_wh(&mut self) -> bool {
         #[cfg(target_arch = "x86_64")]
         unsafe {
-            #[cfg(all(feature = "simd", target_feature = "sse4.2"))]
+            #[cfg(all(
+                target_feature = "sse4.2",
+                feature = "simd",
+                not(feature = "runtime-detection")
+            ))]
             return self.wh_sse4_2();
 
-            #[cfg(not(all(feature = "simd", target_feature = "sse4.2")))]
+            #[cfg(not(all(
+                target_feature = "sse4.2",
+                feature = "simd",
+                not(feature = "runtime-detection")
+            )))]
             self.wh_sse2()
         }
 
