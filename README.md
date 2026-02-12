@@ -112,38 +112,38 @@ This parses JSON into Rust struct using serde API. `Cow<str>` is used for string
 
 ```
 twitter:
-    flexon::from_mut_str                    480.07 µs   1.2251 GiB/s
-    flexon::from_mut_null_padded            506.95 µs   1.1602 GiB/s
-    flexon::from_str                        551.13 µs   1.0672 GiB/s
+    flexon::from_mut_str                    476.42 µs   1.2345 GiB/s
+    flexon::from_mut_null_padded            504.22 µs   1.1664 GiB/s
+    flexon::from_str                        548.12 µs   1.0730 GiB/s
     sonic_rs::from_str                      560.91 µs   1.0486 GiB/s
-    flexon::from_null_padded                586.29 µs   1.0032 GiB/s
+    flexon::from_null_padded                574.35 µs   1.0240 GiB/s
     simd_json::from_str                     698.88 µs   861.75 MiB/s
     serde_json::from_str                    837.95 µs   718.73 MiB/s
 
 citm_catalog:
-    flexon::from_null_padded                966.19 µs   1.6649 GiB/s
-    flexon::from_str                        967.31 µs   1.6630 GiB/s
-    flexon::from_mut_null_padded            971.29 µs   1.6561 GiB/s
-    flexon::from_mut_str                    971.97 µs   1.6550 GiB/s
+    flexon::from_mut_null_padded            906.87 µs   1.7738 GiB/s
+    flexon::from_null_padded                921.01 µs   1.7465 GiB/s
+    flexon::from_mut_str                    942.81 µs   1.7062 GiB/s
+    flexon::from_str                        979.58 µs   1.6421 GiB/s
     sonic_rs::from_str                      1.2714 ms   1.2652 GiB/s
     serde_json::from_str                    1.9147 ms   860.29 MiB/s
     simd_json::from_str                     1.9293 ms   853.76 MiB/s
 
 canada:
-    flexon::from_null_padded                2.6039 ms   824.45 MiB/s
-    flexon::from_mut_null_padded            2.6229 ms   818.48 MiB/s
-    flexon::from_str                        2.8673 ms   748.70 MiB/s
-    flexon::from_mut_str                    2.9453 ms   728.87 MiB/s
+    flexon::from_mut_null_padded            2.6452 ms   811.57 MiB/s
+    flexon::from_null_padded                2.6481 ms   810.68 MiB/s
+    flexon::from_str                        2.8844 ms   744.28 MiB/s
+    flexon::from_mut_str                    2.9535 ms   726.86 MiB/s
     sonic_rs::from_str                      3.2038 ms   670.07 MiB/s
     serde_json::from_str                    3.6377 ms   590.15 MiB/s
     simd_json::from_str                     5.0673 ms   423.65 MiB/s
 
 github_events:
     flexon::from_str                        60.949 µs   1.0191 GiB/s
-    flexon::from_mut_str                    63.843 µs   972.93 MiB/s
+    flexon::from_mut_str                    60.502 µs   1011.8 MiB/s
+    flexon::from_null_padded                65.231 µs   952.23 MiB/s
+    flexon::from_mut_null_padded            65.615 µs   946.65 MiB/s
     simd_json::from_str                     71.653 µs   866.88 MiB/s
-    flexon::from_mut_null_padded            68.483 µs   907.01 MiB/s
-    flexon::from_null_padded                71.110 µs   873.50 MiB/s
     sonic_rs::from_str                      79.947 µs   776.95 MiB/s
     serde_json::from_str                    98.387 µs   631.33 MiB/s
 ```
@@ -231,12 +231,12 @@ twitter:
 
 citm_catalog:
     sonic_rs::from_slice                    617.59 µs   2.6046 GiB/s
-    flexon::from_slice                      660.92 µs   2.4339 GiB/s
+    flexon::from_slice                      635.55 µs   2.5310 GiB/s
     simd_json::to_tape                      1.4192 ms   1.1335 GiB/s
 
 canada:
     sonic_rs::from_slice                    1.4288 ms   1.4673 GiB/s
-    flexon::from_slice                      2.9298 ms   732.74 MiB/s
+    flexon::from_slice                      2.7599 ms   777.84 MiB/s
     simd_json::to_tape                      4.5479 ms   472.03 MiB/s
 ```
 
@@ -264,7 +264,7 @@ canada:
     sonic_rs::get_lazy                      6.0449 ms   355.14 MiB/s
 ```
 
-### Parsing a field from JSON
+## Parsing a field from JSON
 
 These benchmarks are about partial JSON parsing, extracting a specific field without deserializing the entire document. The ones with serde tag might seem slower here. But, serde shines when parsing into structs. And its much more intuitive to do so. Note that, all of them are just parsing a single numeric field in this case as `sonic_rs` return its lazy value only.
 
