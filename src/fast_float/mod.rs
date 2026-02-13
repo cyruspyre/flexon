@@ -10,12 +10,9 @@ mod table;
 
 use binary::compute_float;
 use float::*;
-use number::Number;
+use number::*;
 
-use crate::{
-    Parser, config::Config, fast_float::number::MIN_19DIGIT_INT, misc::INT_LUT, simd::simd_u64,
-    source::Source,
-};
+use crate::{Parser, config::Config, misc::INT_LUT, source::Source};
 
 impl<S: Source, C: Config> Parser<'_, S, C> {
     #[inline(always)]
@@ -33,28 +30,9 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             self.inc(1);
             let stamp = self.idx();
 
-            'tmp: {
-                if S::NULL_PADDED || self.idx() + 7 < self.src.len() {
-                    let Some(chunk) = simd_u64(self.cur_ptr()) else {
-                        break 'tmp;
-                    };
-
-                    mantissa = mantissa.wrapping_mul(100_000_000).wrapping_add(chunk);
-                    self.inc(8);
-                }
-            }
-
-            while S::NULL_PADDED || self.idx() != self.src.len() {
-                let tmp = INT_LUT[self.cur() as usize];
-                if tmp == 16 {
-                    break;
-                }
-
-                mantissa = mantissa.wrapping_mul(10).wrapping_add(tmp as _);
-                self.inc(1);
-            }
-
+            self.parse_mantissa(&mut mantissa);
             let tmp = self.idx() - stamp;
+
             if tmp == 0 {
                 return None;
             }

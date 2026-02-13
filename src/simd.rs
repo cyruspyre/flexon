@@ -1,20 +1,24 @@
 #![allow(unused)]
 
 #[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::{
-    _SIDD_CMP_EQUAL_ANY, _SIDD_NEGATIVE_POLARITY, _mm_and_si128, _mm_clmulepi64_si128,
-    _mm_cmpeq_epi8, _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_load_si128,
-    _mm_loadl_epi64, _mm_loadu_si128, _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8,
-    _mm_or_si128, _mm_packus_epi32, _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8, _mm_setr_epi16,
-    _mm_setzero_si128, _mm_shuffle_epi8, _mm_sub_epi8, _mm_subs_epu8, _mm_xor_si128,
-    _mm256_and_si256, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8,
-    _mm256_set1_epi8, _mm256_setzero_si256, _mm256_sub_epi8, _mm256_zeroupper,
+use core::{
+    arch::x86_64::{
+        _SIDD_CMP_EQUAL_ANY, _SIDD_NEGATIVE_POLARITY, _mm_and_si128, _mm_clmulepi64_si128,
+        _mm_cmpeq_epi8, _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_load_si128,
+        _mm_loadl_epi64, _mm_loadu_si128, _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8,
+        _mm_or_si128, _mm_packus_epi32, _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8,
+        _mm_setr_epi16, _mm_setzero_si128, _mm_shuffle_epi8, _mm_slli_si128, _mm_storeu_si128,
+        _mm_sub_epi8, _mm_subs_epu8, _mm_xor_si128, _mm256_and_si256, _mm256_cmpeq_epi8,
+        _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8, _mm256_setzero_si256,
+        _mm256_sub_epi8, _mm256_zeroupper,
+    },
+    hint::unreachable_unchecked,
 };
 
 use crate::{
     Parser,
     config::Config,
-    misc::{NON_LIT_LUT, likely},
+    misc::{INT_LUT, NON_LIT_LUT, likely},
     source::Source,
 };
 
@@ -174,7 +178,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[target_feature(enable = "sse4.2")]
     unsafe fn wh_sse4_2(&mut self) -> bool {
         const WHITESPACES: [u8; 16] = [
-            b' ', b'\t', b'\n', b'\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            b' ', b'\n', b'\t', b'\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
 
         if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
@@ -186,7 +190,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             );
 
             if idx != 16 {
-                self.inc(idx as _);
+                self.inc(idx as u32 as _);
                 return true;
             }
 
@@ -296,7 +300,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     unsafe fn lit_sse4_2(&mut self) -> bool {
         if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
             const SPECIALS: [u8; 16] = [
-                b'{', b'}', b'[', b']', b'"', b':', b',', b' ', b'\t', b'\n', b'\r', 0, 0, 0, 0, 0,
+                b'{', b'}', b'[', b']', b'"', b':', b',', b' ', b'\n', b'\t', b'\r', 0, 0, 0, 0, 0,
             ];
 
             let idx = _mm_cmpistri(
@@ -306,7 +310,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             );
 
             if idx != 16 {
-                self.inc(idx as _);
+                self.inc(idx as u32 as _);
                 return true;
             }
 
@@ -484,10 +488,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         {
             #[cfg(feature = "runtime-detection")]
             return {
-                use core::{
-                    hint::unreachable_unchecked,
-                    sync::atomic::{AtomicU8, Ordering::Relaxed},
-                };
+                use core::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
                 static FLAG: AtomicU8 = AtomicU8::new(0);
 
@@ -787,4 +788,132 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     //         self.inc(8)
     //     }
     // }
+}
+
+impl<S: Source, C: Config> Parser<'_, S, C> {
+    #[inline(always)]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "ssse3",
+        feature = "simd",
+        not(feature = "runtime-detection")
+    ))]
+    pub(crate) unsafe fn parse_mantissa(&mut self, mantissa: &mut u64) {
+        // http://0x80.pl/notesen/2014-10-15-parsing-decimal-numbers-part-2-sse.html
+
+        let mul_1_10 = _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
+        let mul_1_100 = _mm_setr_epi16(100, 1, 100, 1, 100, 1, 100, 1);
+        let mul_1_10000 = _mm_setr_epi16(10000, 1, 10000, 1, 10000, 1, 10000, 1);
+        let mut tail = [0u8; 16];
+
+        #[inline(always)]
+        pub unsafe fn pow(num: usize) -> u64 {
+            match num {
+                0 => 0,
+                1 => 10,
+                2 => 100,
+                3 => 1000,
+                4 => 10000,
+                5 => 100000,
+                6 => 1000000,
+                7 => 10000000,
+                8 => 100000000,
+                9 => 1000000000,
+                10 => 10000000000,
+                11 => 100000000000,
+                12 => 1000000000000,
+                13 => 10000000000000,
+                14 => 100000000000000,
+                15 => 1000000000000000,
+                16 => 10000000000000000,
+                _ => unreachable_unchecked(),
+            }
+        }
+
+        loop {
+            let ptr = if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
+                self.cur_ptr()
+            } else {
+                // this wont run twice cause after this the number of
+                // parsed digits wont be 16. so the function returns from `count != 16` branch.
+                tail.as_mut_ptr()
+                    .copy_from_nonoverlapping(self.cur_ptr(), self.src.len() - self.idx());
+                tail.as_ptr()
+            };
+            let chunk = _mm_sub_epi8(_mm_loadu_si128(ptr.cast()), _mm_set1_epi8(b'0' as _));
+            let count = _mm_movemask_epi8(_mm_cmpeq_epi8(
+                _mm_subs_epu8(chunk, _mm_set1_epi8(9)),
+                _mm_setzero_si128(),
+            ))
+            .trailing_ones() as usize;
+
+            let aligned = match count {
+                0 => _mm_setzero_si128(),
+                1 => _mm_slli_si128(chunk, 15),
+                2 => _mm_slli_si128(chunk, 14),
+                3 => _mm_slli_si128(chunk, 13),
+                4 => _mm_slli_si128(chunk, 12),
+                5 => _mm_slli_si128(chunk, 11),
+                6 => _mm_slli_si128(chunk, 10),
+                7 => _mm_slli_si128(chunk, 9),
+                8 => _mm_slli_si128(chunk, 8),
+                9 => _mm_slli_si128(chunk, 7),
+                10 => _mm_slli_si128(chunk, 6),
+                11 => _mm_slli_si128(chunk, 5),
+                12 => _mm_slli_si128(chunk, 4),
+                13 => _mm_slli_si128(chunk, 3),
+                14 => _mm_slli_si128(chunk, 2),
+                15 => _mm_slli_si128(chunk, 1),
+                16 => chunk,
+                _ => unreachable_unchecked(),
+            };
+
+            let t1 = _mm_maddubs_epi16(aligned, mul_1_10);
+            let t2 = _mm_madd_epi16(t1, mul_1_100);
+            #[cfg(not(target_feature = "sse4.1"))]
+            let t3 = _mm_shuffle_epi8(
+                t2,
+                _mm_setr_epi8(0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1),
+            );
+            #[cfg(target_feature = "sse4.1")]
+            let t3 = _mm_packus_epi32(t2, t2);
+            let t4 = _mm_madd_epi16(t3, mul_1_10000);
+
+            let mut res = [0u32; 4];
+            _mm_storeu_si128(res.as_mut_ptr().cast(), t4);
+            let chunk = res[0] * 100_000_000 + res[1];
+            *mantissa = mantissa.wrapping_mul(pow(count)).wrapping_add(chunk as _);
+
+            self.inc(count);
+            if count != 16 {
+                return;
+            }
+        }
+    }
+
+    #[inline(always)]
+    #[cfg(not(all(
+        target_arch = "x86_64",
+        target_feature = "ssse3",
+        feature = "simd",
+        not(feature = "runtime-detection")
+    )))]
+    pub(crate) fn parse_mantissa(&mut self, mantissa: &mut u64) {
+        if (S::NULL_PADDED || self.idx() + 7 < self.src.len())
+            && let Some(chunk) = simd_u64(self.cur_ptr())
+        {
+            *mantissa = mantissa.wrapping_mul(100_000_000).wrapping_add(chunk);
+            self.inc(8);
+        }
+
+        while S::NULL_PADDED || self.idx() != self.src.len() {
+            let tmp = INT_LUT[self.cur() as usize];
+            if tmp == 16 {
+                break;
+            }
+
+            *mantissa = mantissa.wrapping_mul(10).wrapping_add(tmp as _);
+            self.inc(1);
+        }
+    }
 }

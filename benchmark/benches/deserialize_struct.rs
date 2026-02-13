@@ -91,16 +91,6 @@ macro_rules! bench {
                     )
                 });
 
-                group.bench_with_input("simd_json::from_slice", &src, |b, src| {
-                    b.iter_batched(
-                        || src.clone(),
-                        |mut src| unsafe {
-                            simd_json::from_slice::<$type>(src.as_bytes_mut()).unwrap();
-                        },
-                        BatchSize::SmallInput
-                    )
-                });
-
                 group.bench_function("flexon::from_reader_unchecked", |b| {
                     b.iter_batched(
                         || BufReader::new(File::open(&path).unwrap()),
@@ -141,7 +131,7 @@ bench! {
     twitter: Twitter,
     citm_catalog: CitmCatalog,
     canada: Canada,
-    github_events: GithubEvents,
+    // github_events: GithubEvents,
 }
 
 criterion_main!(benches);

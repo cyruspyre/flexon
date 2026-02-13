@@ -112,28 +112,28 @@ This parses JSON into Rust struct using serde API. `Cow<str>` is used for string
 
 ```
 twitter:
-    flexon::from_mut_str                    476.42 µs   1.2345 GiB/s
-    flexon::from_mut_null_padded            504.22 µs   1.1664 GiB/s
-    flexon::from_str                        548.12 µs   1.0730 GiB/s
+    flexon::from_mut_str                    475.66 µs   1.2365 GiB/s
+    flexon::from_mut_null_padded            506.51 µs   1.1612 GiB/s
+    flexon::from_str                        543.74 µs   1.0817 GiB/s
     sonic_rs::from_str                      560.91 µs   1.0486 GiB/s
-    flexon::from_null_padded                574.35 µs   1.0240 GiB/s
+    flexon::from_null_padded                568.29 µs   1.0349 GiB/s
     simd_json::from_str                     698.88 µs   861.75 MiB/s
     serde_json::from_str                    837.95 µs   718.73 MiB/s
 
 citm_catalog:
-    flexon::from_mut_null_padded            906.87 µs   1.7738 GiB/s
-    flexon::from_null_padded                921.01 µs   1.7465 GiB/s
-    flexon::from_mut_str                    942.81 µs   1.7062 GiB/s
-    flexon::from_str                        979.58 µs   1.6421 GiB/s
+    flexon::from_null_padded                895.83 µs   1.7956 GiB/s
+    flexon::from_mut_null_padded            899.05 µs   1.7892 GiB/s
+    flexon::from_mut_str                    929.98 µs   1.7297 GiB/s
+    flexon::from_str                        951.27 µs   1.6910 GiB/s
     sonic_rs::from_str                      1.2714 ms   1.2652 GiB/s
     serde_json::from_str                    1.9147 ms   860.29 MiB/s
     simd_json::from_str                     1.9293 ms   853.76 MiB/s
 
 canada:
-    flexon::from_mut_null_padded            2.6452 ms   811.57 MiB/s
-    flexon::from_null_padded                2.6481 ms   810.68 MiB/s
-    flexon::from_str                        2.8844 ms   744.28 MiB/s
-    flexon::from_mut_str                    2.9535 ms   726.86 MiB/s
+    flexon::from_mut_null_padded            2.5406 ms   844.98 MiB/s
+    flexon::from_null_padded                2.5460 ms   843.19 MiB/s
+    flexon::from_str                        2.7299 ms   786.38 MiB/s
+    flexon::from_mut_str                    2.7619 ms   777.27 MiB/s
     sonic_rs::from_str                      3.2038 ms   670.07 MiB/s
     serde_json::from_str                    3.6377 ms   590.15 MiB/s
     simd_json::from_str                     5.0673 ms   423.65 MiB/s
@@ -158,12 +158,12 @@ twitter:
     serde_json::from_reader                 3.1992 ms   188.25 MiB/s
 
 citm_catalog:
-    flexon::from_reader                     4.1157 ms   400.22 MiB/s
+    flexon::from_reader                     3.8849 ms   424.00 MiB/s
     serde_json::from_reader                 5.4789 ms   300.64 MiB/s
 
 canada:
     serde_json::from_reader                 7.6590 ms   280.29 MiB/s
-    flexon::from_reader                     10.440 ms   205.63 MiB/s
+    flexon::from_reader                     7.7365 ms   277.49 MiB/s
 
 github_events:
     flexon::from_reader                     341.73 µs   181.76 MiB/s
@@ -189,7 +189,7 @@ citm_catalog:
 
 canada:
     sonic_rs::from_slice                    2.9747 ms   721.67 MiB/s
-    flexon::from_slice                      6.6070 ms   324.92 MiB/s
+    flexon::from_slice                      6.2813 ms   341.77 MiB/s
     simd_json::to_borrowed_value            8.4256 ms   254.79 MiB/s
 ```
 
@@ -211,7 +211,7 @@ citm_catalog:
     serde_json::from_slice                  4.6329 ms   355.54 MiB/s
 
 canada:
-    flexon::from_slice                      12.253 ms   175.21 MiB/s
+    flexon::from_slice                      12.040 ms   178.30 MiB/s
     simd_json::from_slice                   12.990 ms   165.26 MiB/s
     sonic_rs::from_slice                    13.231 ms   162.25 MiB/s
     serde_json::from_slice                  13.417 ms   160.00 MiB/s
@@ -226,12 +226,12 @@ JSON values that are built lazily but still perform validation while parsing.
 ```
 twitter:
     sonic_rs::from_slice                    284.59 µs   2.0667 GiB/s
-    flexon::from_slice                      293.04 µs   2.0071 GiB/s
+    flexon::from_slice                      288.77 µs   2.0367 GiB/s
     simd_json::to_tape                      516.89 µs   1.1379 GiB/s
 
 citm_catalog:
+    flexon::from_slice                      615.81 µs   2.6122 GiB/s
     sonic_rs::from_slice                    617.59 µs   2.6046 GiB/s
-    flexon::from_slice                      635.55 µs   2.5310 GiB/s
     simd_json::to_tape                      1.4192 ms   1.1335 GiB/s
 
 canada:
@@ -253,7 +253,7 @@ twitter:
 
 citm_catalog:
     sonic_rs::get_lazy (pointer)            143.37 µs   11.220 GiB/s
-    flexon::get_lazy (pointer)              181.61 µs   8.8574 GiB/s
+    flexon::get_lazy (pointer)              180.10 µs   8.9315 GiB/s
     flexon::get_lazy                        355.75 µs   4.5217 GiB/s
     sonic_rs::get_lazy                      819.43 µs   1.9631 GiB/s
 
@@ -280,7 +280,7 @@ twitter:
 
 citm_catalog:
     sonic_rs::get_from (lazy) (unchecked)   146.69 µs   10.966 GiB/s
-    flexon::get_from (lazy) (unchecked)     183.86 µs   8.7488 GiB/s
+    flexon::get_from (lazy) (unchecked)     181.00 µs   8.8870 GiB/s
     sonic_rs::get_from (lazy)               565.91 µs   2.8425 GiB/s
     flexon::get_from (lazy)                 628.27 µs   2.5603 GiB/s
     flexon::get_from (serde)                647.04 µs   2.4861 GiB/s
