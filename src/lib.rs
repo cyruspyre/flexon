@@ -1,8 +1,8 @@
 #![cfg_attr(feature = "nightly", feature(likely_unlikely, cold_path))]
+#![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::std_instead_of_core)]
-#![doc = include_str!("../README.md")]
 
 #[cfg(feature = "serde")]
 pub mod serde;
