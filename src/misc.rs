@@ -9,6 +9,8 @@ pub const NUM_LUT: [bool; 256] = {
 
     tmp[b'-' as usize] = true;
     tmp[b'.' as usize] = true;
+    tmp[b'e' as usize] = true;
+    tmp[b'E' as usize] = true;
 
     tmp
 };

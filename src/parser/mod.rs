@@ -1007,7 +1007,12 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
 
         // ignore overflow as it will be handled in float parsing
-        while S::NULL_PADDED || self.idx() != self.src.len() {
+        loop {
+            if !S::NULL_PADDED && self.idx() == self.src.len() {
+                self.dec();
+                break;
+            }
+
             let tmp = INT_LUT[self.cur() as usize];
             if tmp == 16 {
                 break;
@@ -1017,7 +1022,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             self.inc(1);
         }
 
-        self.dec();
         (val, false)
     }
 }
