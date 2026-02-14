@@ -1,7 +1,13 @@
 //! serde specific API.
 
+#[cfg(feature = "span")]
+mod span;
+
 pub mod error;
 mod unchecked;
+
+#[cfg(feature = "span")]
+use span::*;
 
 use core::{
     alloc::Layout, hint::select_unpredictable, ptr::dangling_mut, slice::from_raw_parts,
@@ -142,6 +148,11 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             Err(Kind::InvalidLiteral.into())
         }
     }
+
+    // #[cold]
+    // fn err(&self, kind: Kind) -> Error {
+    //     Error(Box::new(kind))
+    // }
 }
 
 macro_rules! deserialize_literal {
@@ -538,10 +549,14 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
-        _: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
-        visitor.visit_newtype_struct(self)
+        match name {
+            #[cfg(feature = "span")]
+            TOKEN => visitor.visit_seq(Builder::new(self)),
+            _ => visitor.visit_newtype_struct(self),
+        }
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -940,7 +955,7 @@ impl<'a, 'de, S: Source, C: Config> de::VariantAccess<'de> for UnitVariantAccess
 /// }
 ///
 /// let json = r#"{"name": "idk", "pages": 256}"#;
-/// let person: Book = flexon::from_str(json)?;
+/// let book: Book = flexon::from_str(json)?;
 /// # Ok::<(), flexon::serde::Error>(())
 /// ```
 #[inline]

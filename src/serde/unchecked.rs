@@ -1,3 +1,6 @@
+#[cfg(feature = "span")]
+use super::span::*;
+
 use core::{
     alloc::Layout,
     fmt::{self, Debug, Display, Formatter},
@@ -379,10 +382,14 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Unchecked<'_, 'de, S,
 
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
-        _: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
-        visitor.visit_newtype_struct(self)
+        match name {
+            #[cfg(feature = "span")]
+            TOKEN => unsafe { Ok(visitor.visit_seq(Builder::new(self)).unwrap_unchecked()) },
+            _ => visitor.visit_newtype_struct(self),
+        }
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {

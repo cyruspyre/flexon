@@ -6,7 +6,7 @@ use serde::de;
 
 /// Represents error occurred while parsing.
 #[derive(Debug)]
-pub struct Error(Box<Kind>);
+pub struct Error(pub(super) Box<Kind>);
 
 /// Represents the type of error.
 #[derive(Debug, PartialEq)]

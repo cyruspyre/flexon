@@ -44,8 +44,6 @@ println!(
 );
 ```
 
-Note: serde APIs don't support span information as of right now. However, comments and configurations are available.
-
 ### Parsing only a portion of JSON
 
 There might be cases where you want to parse only a portion of the JSON. Say no more, you can do them quite easily. It is faster to do so than parsing the whole thing and getting the value you want. Given, you don't care about the trailing data. There are both checked and unchecked APIs for this. The former will validate the JSON as it goes forward and return early once the value has been parsed. As such the trailing data is ignored.
@@ -94,7 +92,7 @@ If you need JSON values to be parsed lazily, then they are available. Nothing is
 
 `prealloc` (default): Pre-allocates object/array based on its previous length. Has no effect in serde APIs. This is pretty niche but works well when the object/array is uniform. Might become an overhead instead when using custom allocators.
 
-`span`: Enables span information on the parsed JSON data. Performance overhead is minimal. Not available in lazy value and serde APIs.
+`span`: Enables span information on the parsed JSON data.
 
 `serde` (default): Implements serde specific APIs. Serialization not available. Probably in the future.
 

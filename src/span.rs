@@ -12,7 +12,28 @@ use crate::{
     value::{Array, Number, Object, builder::*},
 };
 
-/// A wrapper with the values starting and ending byte offset.
+/// A spanned value with its starting and ending byte offset.
+///
+/// # Example
+/// ```
+/// use flexon::span::Span;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Book {
+///     name: Span<String>,
+///     pages: Span<u32>,
+/// }
+///
+/// let json = r#"{"name": "idk", "pages": 256}"#;
+/// let book: Span<Book> = flexon::from_str(json)?;
+/// let span: Span<u32> = book.data().pages;
+///
+/// assert_eq!(span.start(), 25);
+/// assert_eq!(span.end(), 27);
+///
+/// # Ok::<(), flexon::serde::Error>(())
+/// ```
 pub struct Span<T> {
     data: T,
     start: usize,
@@ -65,12 +86,17 @@ pub use owned::OwnedValue;
 
 impl<T> Span<T> {
     #[inline]
-    fn new(data: T) -> Self {
+    pub(crate) fn new(data: T) -> Self {
         Self {
             data,
             start: 0,
             end: 0,
         }
+    }
+
+    #[inline]
+    pub(crate) fn with(data: T, start: usize, end: usize) -> Self {
+        Self { data, start, end }
     }
 
     /// Returns a reference to its value.
@@ -373,6 +399,18 @@ impl<T: Deref<Target = str>> Deref for Span<T> {
         &self.data
     }
 }
+
+impl<T: Clone> Clone for Span<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            ..*self
+        }
+    }
+}
+
+impl<T: Copy> Copy for Span<T> {}
 
 impl<T: Debug> Debug for Span<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
