@@ -6,7 +6,11 @@ use serde::de;
 
 /// Represents error occurred while parsing.
 #[derive(Debug)]
-pub struct Error(pub(super) Box<Kind>);
+pub struct Error {
+    pub(super) kind: Box<Kind>,
+    #[cfg(feature = "span")]
+    pub(crate) span: [usize; 2],
+}
 
 /// Represents the type of error.
 #[derive(Debug, PartialEq)]
@@ -42,21 +46,29 @@ pub enum Kind {
 
 impl Error {
     /// Returns the error kind.
+    #[inline]
     pub fn kind(&self) -> &Kind {
-        &self.0
+        &self.kind
     }
-}
 
-impl Into<Error> for Kind {
-    #[cold]
-    fn into(self) -> Error {
-        Error(Box::new(self))
+    /// Returns the starting byte offset of the error.
+    #[inline]
+    #[cfg(feature = "span")]
+    pub fn start(&self) -> usize {
+        self.span[0]
+    }
+
+    /// Returns the ending byte offset of the error.
+    #[inline]
+    #[cfg(feature = "span")]
+    pub fn end(&self) -> usize {
+        self.span[1]
     }
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        f.write_str(match &*self.0 {
+        f.write_str(match &*self.kind {
             Kind::Message(data) => data,
             Kind::Eof => "eof while parsing",
             Kind::ExpectedColon => "expected colon",
@@ -76,7 +88,11 @@ impl Display for Error {
 
 impl de::Error for Error {
     fn custom<T: Display>(msg: T) -> Self {
-        Error(Box::new(Kind::Message(msg.to_string().into_boxed_str())))
+        Error {
+            kind: Box::new(Kind::Message(msg.to_string().into_boxed_str())),
+            #[cfg(feature = "span")]
+            span: [0; 2],
+        }
     }
 }
 

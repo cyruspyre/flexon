@@ -39,8 +39,6 @@ use crate::{
 
 pub use error::Error;
 
-// todo: error
-
 pub type Result<T> = core::result::Result<T, Error>;
 
 impl<S: Source, C: Config> Parser<'_, S, C> {
@@ -62,6 +60,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
     }
 
+    #[allow(unused_mut)]
     unsafe fn parse_literal<'a, V: Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value> {
         if S::Volatility::IS_VOLATILE {
             let tmp = self.idx().wrapping_add(1);
@@ -69,6 +68,8 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         let tmp = self.skip_whitespace();
+        #[cfg(feature = "span")]
+        let stamp = self.idx();
 
         if NUM_LUT[tmp as usize] {
             let neg = tmp == b'-';
@@ -79,14 +80,17 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             if unlikely(
                 !S::NULL_PADDED && self.idx() == self.src.len() || !NUM_LUT[self.cur() as usize],
             ) {
-                return Err(Kind::InvalidLiteral.into());
+                let mut tmp = self.err(Kind::InvalidLiteral);
+                #[cfg(feature = "span")]
+                tmp.span.fill(self.idx() - 1);
+                return Err(tmp);
             }
 
             if self.cur() == b'0'
                 && (S::NULL_PADDED || self.idx() + 1 != self.src.len())
                 && matches!(*self.cur_ptr().add(1), b'0'..=b'9')
             {
-                return Err(Kind::LeadingZero.into());
+                return Err(self.err(Kind::LeadingZero));
             }
 
             let start = self.idx();
@@ -108,7 +112,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             }
 
             if start == self.idx() {
-                return Err(Kind::LeadingDecimal.into());
+                return Err(self.err(Kind::LeadingDecimal));
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {
@@ -116,43 +120,58 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 return if val.is_finite() {
                     visitor.visit_f64(val)
                 } else {
-                    Err(Kind::NumberOverflow.into())
+                    let mut tmp = self.err(Kind::NumberOverflow);
+                    #[cfg(feature = "span")]
+                    (tmp.span[0] = stamp);
+                    Err(tmp)
                 };
             }
 
-            return Err(select_unpredictable(
-                *self.cur_ptr().sub(1) == b'.',
-                Kind::TrailingDecimal,
-                Kind::InvalidLiteral,
-            )
-            .into());
+            let mut tmp = self.err(Kind::TrailingDecimal);
+            #[cfg(feature = "span")]
+            tmp.span.fill(self.idx() - 1);
+            return Err(tmp);
         }
 
-        self.inc(3);
-        if S::NULL_PADDED || self.idx() < self.src.len() {
-            let ptr = self.cur_ptr().sub(3);
-
-            match ptr.cast::<u32>().read_unaligned() {
-                0x6c6c756e => visitor.visit_unit(),
-                0x65757274 => visitor.visit_bool(true),
-                0x736c6166
-                    if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
-                        && *ptr.add(4) == b'e' =>
-                {
-                    self.inc(1);
-                    visitor.visit_bool(false)
-                }
-                _ => Err(Kind::InvalidLiteral.into()),
+        let tmp = match S::NULL_PADDED || self.idx() + 3 < self.src.len() {
+            true => 'tmp: {
+                self.inc(3);
+                return match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
+                    0x6c6c756e => visitor.visit_unit(),
+                    0x65757274 => visitor.visit_bool(true),
+                    0x736c6166
+                        if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
+                            && *self.cur_ptr().add(1) == b'e' =>
+                    {
+                        self.inc(1);
+                        visitor.visit_bool(false)
+                    }
+                    _ => break 'tmp Kind::InvalidLiteral,
+                };
             }
-        } else {
-            Err(Kind::InvalidLiteral.into())
+            false => Kind::InvalidLiteral,
+        };
+        let mut tmp = self.err(tmp);
+
+        #[cfg(feature = "span")]
+        {
+            tmp.span[0] = stamp;
+            // skips non whitespace chars with bounds checking.
+            self.skip_literal_unchecked();
+            tmp.span[1] = self.idx();
         }
+
+        Err(tmp)
     }
 
-    // #[cold]
-    // fn err(&self, kind: Kind) -> Error {
-    //     Error(Box::new(kind))
-    // }
+    #[cold]
+    fn err(&mut self, kind: Kind) -> Error {
+        Error {
+            kind: Box::new(kind),
+            #[cfg(feature = "span")]
+            span: [self.idx(); 2],
+        }
+    }
 }
 
 macro_rules! deserialize_literal {
@@ -176,7 +195,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             b'"' => self.deserialize_str(visitor),
             b'{' => self.deserialize_map(visitor),
             b'[' => self.deserialize_seq(visitor),
-            0 => Err(Kind::Eof.into()),
+            0 => Err(self.err(Kind::Eof)),
             _ => unsafe { self.parse_literal(visitor) },
         }
     }
@@ -185,9 +204,10 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         self.deserialize_str(visitor)
     }
 
+    #[allow(unused_mut)]
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         if self.skip_whitespace() != b'"' {
-            return Err(Kind::UnexpectedToken.into());
+            return Err(self.err(Kind::UnexpectedToken));
         }
 
         if S::Volatility::IS_VOLATILE {
@@ -223,7 +243,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                         return if S::UTF8 || from_utf8(tmp).is_ok() {
                             visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
                         } else {
-                            Err(Kind::UnexpectedToken.into())
+                            Err(self.err(Kind::UnexpectedToken))
                         };
                     },
                     b'\\' => unsafe {
@@ -269,9 +289,19 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                     _ => Kind::ControlCharacter,
                 };
             };
+            let err = self.close_string(err);
+            let mut err = self.err(err);
 
-            Err(err.into())
+            #[cfg(feature = "span")]
+            unsafe {
+                // exclude quote
+                err.span[0] = start.offset_from_unsigned(self.src.ptr(0)) - 1
+            }
+
+            Err(err)
         } else if !S::Volatility::IS_VOLATILE & !S::INSITU {
+            #[cfg(feature = "span")]
+            let start = self.idx();
             let mut offset = unsafe { self.cur_ptr().add(1) };
             let mut buf = dangling_mut();
             let mut cap = 0;
@@ -350,14 +380,17 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                         _ => Kind::ControlCharacter,
                     };
                 };
+                let err = self.close_string(err);
+                let mut err = self.err(err);
 
-                return unsafe {
-                    if cap != 0 {
-                        dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked());
-                    }
+                #[cfg(feature = "span")]
+                (err.span[0] = start);
 
-                    Err(err.into())
-                };
+                if cap != 0 {
+                    unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked()) }
+                }
+
+                return Err(err);
             }
 
             if len == 0 {
@@ -367,7 +400,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                     if S::UTF8 || from_utf8(tmp).is_ok() {
                         visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
                     } else {
-                        Err(Kind::UnexpectedToken.into())
+                        Err(self.err(Kind::UnexpectedToken))
                     }
                 };
             }
@@ -395,10 +428,12 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
                     visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
                 } else {
-                    Err(Kind::UnexpectedToken.into())
+                    Err(self.err(Kind::UnexpectedToken))
                 }
             };
         } else {
+            #[cfg(feature = "span")]
+            let start = self.idx();
             let mut offset = self.idx() + 1;
             let mut buf = dangling_mut();
             let mut cap = 0;
@@ -473,14 +508,17 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                         _ => Kind::ControlCharacter,
                     };
                 };
+                let err = self.close_string(err);
+                let mut err = self.err(err);
 
-                return unsafe {
-                    if cap != 0 {
-                        dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
-                    }
+                #[cfg(feature = "span")]
+                (err.span[0] = start);
 
-                    Err(err.into())
-                };
+                if cap != 0 {
+                    unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked()) }
+                }
+
+                return Err(err);
             }
 
             let count = self.idx() - offset;
@@ -510,7 +548,10 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
                     visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
                 } else {
-                    Err(Kind::UnexpectedToken.into())
+                    let mut tmp = self.err(Kind::UnexpectedToken);
+                    #[cfg(feature = "span")]
+                    (tmp.span[0] = start);
+                    Err(tmp)
                 }
             }
         }
@@ -521,22 +562,16 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        match self.skip_whitespace() {
-            b'n' => unsafe {
-                if (S::NULL_PADDED || self.idx() + 3 < self.src.len())
-                    && from_raw_parts(self.cur_ptr(), 4) == b"null"
-                {
-                    self.inc(3);
-                    visitor.visit_none()
-                } else {
-                    Err(Kind::InvalidLiteral.into())
-                }
-            },
-            _ => {
-                self.dec();
-                visitor.visit_some(self)
-            }
+        if self.skip_whitespace() == b'n'
+            && (S::NULL_PADDED || self.idx() + 3 < self.src.len())
+            && unsafe { from_raw_parts(self.cur_ptr(), 4) == b"null" }
+        {
+            self.inc(3);
+            return visitor.visit_none();
         }
+
+        self.dec();
+        visitor.visit_some(self)
     }
 
     fn deserialize_unit_struct<V: Visitor<'de>>(
@@ -565,20 +600,21 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             self.src.trim(tmp);
         }
 
-        Err(match self.skip_whitespace() {
+        let tmp = match self.skip_whitespace() {
             b'[' => {
                 let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
 
-                if self.skip_whitespace_alt() == b']' {
-                    return Ok(tmp);
-                } else {
-                    Kind::UnexpectedToken
+                match self.skip_whitespace_alt() {
+                    b']' => return Ok(tmp),
+                    0 => Kind::Eof,
+                    _ => Kind::UnexpectedToken,
                 }
             }
             0 => Kind::Eof,
             _ => Kind::UnexpectedToken,
-        }
-        .into())
+        };
+
+        Err(self.err(tmp))
     }
 
     fn deserialize_tuple<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
@@ -599,13 +635,13 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             let tmp = self.idx().wrapping_add(1);
             self.src.trim(tmp);
         }
-
-        Err(match self.skip_whitespace() {
+        let tmp = match self.skip_whitespace() {
             b'{' => return visitor.visit_map(CommaSeparated::new(self)),
             0 => Kind::Eof,
             _ => Kind::UnexpectedToken,
-        }
-        .into())
+        };
+
+        Err(self.err(tmp))
     }
 
     fn deserialize_struct<V: Visitor<'de>>(
@@ -614,20 +650,22 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         _: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        Err(match self.skip_whitespace() {
+        let tmp = match self.skip_whitespace() {
             b'{' => return visitor.visit_map(CommaSeparated::new(self)),
             b'[' => {
                 let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
 
-                if self.skip_whitespace_alt() == b']' {
-                    return Ok(tmp);
-                } else {
-                    Kind::UnexpectedToken
+                match self.skip_whitespace_alt() {
+                    b']' => return Ok(tmp),
+                    0 => Kind::Eof,
+                    _ => Kind::UnexpectedToken,
                 }
             }
+            0 => Kind::Eof,
             _ => Kind::UnexpectedToken,
-        }
-        .into())
+        };
+
+        Err(self.err(tmp))
     }
 
     fn deserialize_enum<V: Visitor<'de>>(
@@ -636,20 +674,22 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         _: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        Err(match self.skip_whitespace() {
+        let tmp = match self.skip_whitespace() {
             b'{' => {
                 let tmp = visitor.visit_enum(VariantAccess(self))?;
 
                 match self.skip_whitespace() {
                     b'}' => return Ok(tmp),
+                    0 => Kind::Eof,
                     _ => Kind::UnexpectedToken,
                 }
             }
             b'"' => return visitor.visit_enum(UnitVariantAccess(self)),
             0 => Kind::Eof,
             _ => Kind::UnexpectedToken,
-        }
-        .into())
+        };
+
+        Err(self.err(tmp))
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -657,78 +697,6 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
     }
 
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        #[doc(hidden)]
-        #[allow(non_local_definitions)]
-        impl crate::value::builder::ErrorBuilder for Error {
-            #[inline]
-            fn eof() -> Self {
-                Kind::Eof.into()
-            }
-
-            #[inline]
-            fn expected_colon() -> Self {
-                Kind::ExpectedColon.into()
-            }
-
-            #[inline]
-            fn expected_value() -> Self {
-                Kind::Eof.into()
-            }
-
-            #[inline]
-            fn trailing_comma() -> Self {
-                Kind::TrailingComma.into()
-            }
-
-            #[inline]
-            fn unclosed_string() -> Self {
-                Kind::UnclosedString.into()
-            }
-
-            #[inline]
-            fn invalid_escape() -> Self {
-                Kind::InvalidEscapeSequnce.into()
-            }
-
-            #[inline]
-            fn control_character() -> Self {
-                Kind::ControlCharacter.into()
-            }
-
-            #[inline]
-            fn invalid_literal() -> Self {
-                Kind::InvalidLiteral.into()
-            }
-
-            #[inline]
-            fn trailing_decimal() -> Self {
-                Kind::TrailingDecimal.into()
-            }
-
-            #[inline]
-            fn leading_decimal() -> Self {
-                Kind::LeadingDecimal.into()
-            }
-
-            #[inline]
-            fn leading_zero() -> Self {
-                Kind::LeadingZero.into()
-            }
-
-            #[inline]
-            fn number_overflow() -> Self {
-                Kind::NumberOverflow.into()
-            }
-
-            #[inline]
-            fn unexpected_token() -> Self {
-                Kind::UnexpectedToken.into()
-            }
-
-            #[inline]
-            fn apply_span(&mut self, _: usize, _: usize) {}
-        }
-
         self.skip_value()?;
         visitor.visit_unit()
     }
@@ -794,7 +762,11 @@ impl<'a, 'de, S: Source, C: Config> MapAccess<'de> for CommaSeparated<'a, 'de, S
                 }
                 b'}' => match wtf || self.de.cfg.trailing_comma() {
                     true => return Ok(None),
-                    _ => Kind::TrailingComma,
+                    _ => {
+                        #[cfg(feature = "span")]
+                        self.de.dec();
+                        Kind::TrailingComma
+                    }
                 },
                 0 => Kind::Eof,
                 _ if self.de.cfg.comma() => {
@@ -805,13 +777,13 @@ impl<'a, 'de, S: Source, C: Config> MapAccess<'de> for CommaSeparated<'a, 'de, S
                 _ => Kind::UnexpectedToken,
             };
 
-            return Err(err.into());
+            return Err(self.de.err(err));
         }
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
         if self.de.skip_whitespace() != b':' {
-            return Err(Kind::ExpectedColon.into());
+            return Err(self.de.err(Kind::ExpectedColon));
         }
 
         seed.deserialize(&mut *self.de)
@@ -831,7 +803,11 @@ impl<'a, 'de, S: Source, C: Config> SeqAccess<'de> for CommaSeparated<'a, 'de, S
                         self.de.dec();
                         return Ok(None);
                     }
-                    _ => Kind::TrailingComma,
+                    _ => {
+                        #[cfg(feature = "span")]
+                        self.de.dec();
+                        Kind::TrailingComma
+                    }
                 },
                 _ if self.flag => {
                     self.de.dec();
@@ -852,7 +828,7 @@ impl<'a, 'de, S: Source, C: Config> SeqAccess<'de> for CommaSeparated<'a, 'de, S
                 _ => Kind::UnexpectedToken,
             };
 
-            return Err(err.into());
+            return Err(self.de.err(err));
         }
     }
 }
@@ -869,7 +845,7 @@ impl<'a, 'de, S: Source, C: Config> EnumAccess<'de> for VariantAccess<'a, 'de, S
         if self.0.skip_whitespace() == b':' {
             Ok((tmp, self))
         } else {
-            Err(Kind::ExpectedColon.into())
+            Err(self.0.err(Kind::ExpectedColon))
         }
     }
 }
@@ -938,6 +914,164 @@ impl<'a, 'de, S: Source, C: Config> de::VariantAccess<'de> for UnitVariantAccess
         ))
     }
 }
+
+#[allow(non_local_definitions)]
+const _: fn() = || {
+    use crate::{serde::error::Kind, value::builder::ErrorBuilder};
+
+    #[doc(hidden)]
+    impl ErrorBuilder for Kind {
+        #[inline]
+        fn eof() -> Self {
+            Kind::Eof
+        }
+
+        #[inline]
+        fn expected_colon() -> Self {
+            Kind::ExpectedColon
+        }
+
+        #[inline]
+        fn expected_value() -> Self {
+            Kind::Eof
+        }
+
+        #[inline]
+        fn trailing_comma() -> Self {
+            Kind::TrailingComma
+        }
+
+        #[inline]
+        fn unclosed_string() -> Self {
+            Kind::UnclosedString
+        }
+
+        #[inline]
+        fn invalid_escape() -> Self {
+            Kind::InvalidEscapeSequnce
+        }
+
+        #[inline]
+        fn control_character() -> Self {
+            Kind::ControlCharacter
+        }
+
+        #[inline]
+        fn invalid_literal() -> Self {
+            Kind::InvalidLiteral
+        }
+
+        #[inline]
+        fn trailing_decimal() -> Self {
+            Kind::TrailingDecimal
+        }
+
+        #[inline]
+        fn leading_decimal() -> Self {
+            Kind::LeadingDecimal
+        }
+
+        #[inline]
+        fn leading_zero() -> Self {
+            Kind::LeadingZero
+        }
+
+        #[inline]
+        fn number_overflow() -> Self {
+            Kind::NumberOverflow
+        }
+
+        #[inline]
+        fn unexpected_token() -> Self {
+            Kind::UnexpectedToken
+        }
+
+        fn apply_span(&mut self, _: usize, _: usize) {}
+    }
+
+    #[doc(hidden)]
+    impl ErrorBuilder for Error {
+        #[inline]
+        fn eof() -> Self {
+            Kind::Eof.into()
+        }
+
+        #[inline]
+        fn expected_colon() -> Self {
+            Kind::ExpectedColon.into()
+        }
+
+        #[inline]
+        fn expected_value() -> Self {
+            Kind::Eof.into()
+        }
+
+        #[inline]
+        fn trailing_comma() -> Self {
+            Kind::TrailingComma.into()
+        }
+
+        #[inline]
+        fn unclosed_string() -> Self {
+            Kind::UnclosedString.into()
+        }
+
+        #[inline]
+        fn invalid_escape() -> Self {
+            Kind::InvalidEscapeSequnce.into()
+        }
+
+        #[inline]
+        fn control_character() -> Self {
+            Kind::ControlCharacter.into()
+        }
+
+        #[inline]
+        fn invalid_literal() -> Self {
+            Kind::InvalidLiteral.into()
+        }
+
+        #[inline]
+        fn trailing_decimal() -> Self {
+            Kind::TrailingDecimal.into()
+        }
+
+        #[inline]
+        fn leading_decimal() -> Self {
+            Kind::LeadingDecimal.into()
+        }
+
+        #[inline]
+        fn leading_zero() -> Self {
+            Kind::LeadingZero.into()
+        }
+
+        #[inline]
+        fn number_overflow() -> Self {
+            Kind::NumberOverflow.into()
+        }
+
+        #[inline]
+        fn unexpected_token() -> Self {
+            Kind::UnexpectedToken.into()
+        }
+
+        #[inline]
+        fn apply_span(&mut self, _: usize, _: usize) {}
+    }
+
+    #[doc(hidden)]
+    impl Into<Error> for Kind {
+        #[cold]
+        fn into(self) -> Error {
+            Error {
+                kind: Box::new(self),
+                #[cfg(feature = "span")]
+                span: [0; 2],
+            }
+        }
+    }
+};
 
 /// Deserializes specified type from a JSON string input.
 ///
