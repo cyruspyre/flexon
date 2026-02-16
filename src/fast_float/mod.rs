@@ -37,7 +37,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 return None;
             }
 
-            exponent = tmp.wrapping_neg() as i64;
+            exponent = (tmp as i64).wrapping_neg();
             n_digits += tmp;
         }
 

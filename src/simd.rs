@@ -49,6 +49,7 @@ pub fn simd_u64(ptr: *const u8) -> Option<u64> {
 }
 
 #[inline(always)]
+#[cfg(target_arch = "x86_64")]
 unsafe fn ssse3_u64(ptr: *const u8) -> Option<u64> {
     let zero = _mm_set1_epi8(b'0' as _);
     let mul_1_10 = _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
