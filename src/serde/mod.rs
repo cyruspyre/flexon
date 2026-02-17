@@ -284,7 +284,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             Kind::InvalidEscapeSequnce,
                         )
                     },
-                    c if !c.is_ascii_control() => continue,
+                    0x20.. => continue,
                     0 => Kind::UnclosedString,
                     _ => Kind::ControlCharacter,
                 };
@@ -375,7 +375,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                                 Kind::InvalidEscapeSequnce,
                             )
                         },
-                        c if !c.is_ascii_control() => continue,
+                        0x20.. => continue,
                         0 if S::NULL_PADDED => Kind::Eof,
                         _ => Kind::ControlCharacter,
                     };
@@ -504,7 +504,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
                             Kind::InvalidEscapeSequnce
                         },
-                        c if !c.is_ascii_control() => continue,
+                        0x20.. => continue,
                         _ => Kind::ControlCharacter,
                     };
                 };

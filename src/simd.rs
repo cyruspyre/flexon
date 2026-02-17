@@ -378,12 +378,9 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                     _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'"' as _)),
                     _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'\\' as _)),
                 ),
-                _mm_or_si128(
-                    _mm_cmpeq_epi8(
-                        _mm_subs_epu8(chunk, _mm_set1_epi8(0x1F)),
-                        _mm_setzero_si128(),
-                    ),
-                    _mm_cmpeq_epi8(chunk, _mm_set1_epi8(0x7F)),
+                _mm_cmpeq_epi8(
+                    _mm_subs_epu8(chunk, _mm_set1_epi8(0x1F)),
+                    _mm_setzero_si128(),
                 ),
             ));
 
@@ -426,7 +423,6 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             const QUOTE: u64 = b'"' as u64 * ONES;
             const SLASH: u64 = b'\\' as u64 * ONES;
             const CTRL: u64 = 0x20 * ONES;
-            const DEL: u64 = 127 * ONES;
 
             let chunk = unsafe { self.cur_ptr().add(1).cast::<u64>().read_unaligned() };
 
@@ -438,10 +434,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             let tmp = chunk ^ SLASH;
             let slash = tmp.wrapping_sub(ONES) & !tmp & HIGH;
 
-            let tmp = chunk ^ DEL;
-            let del = tmp.wrapping_sub(ONES) & !tmp & HIGH;
-
-            let mask = quote | slash | ctrl | del;
+            let mask = quote | slash | ctrl;
 
             if mask == 0 {
                 self.inc(8);

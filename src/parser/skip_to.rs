@@ -282,7 +282,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         }
                         E::invalid_escape()
                     },
-                    c if !c.is_ascii_control() => continue,
+                    0x20.. => continue,
                     _ => E::control_character(),
                 };
             };

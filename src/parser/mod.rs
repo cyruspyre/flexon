@@ -685,7 +685,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
                         continue;
                     }
-                    c if !c.is_ascii_control() => continue,
+                    0x20.. => continue,
                     0 if S::NULL_PADDED => E::eof(),
                     _ => match V::REJECT_CTRL_CHAR {
                         true => E::control_character(),
