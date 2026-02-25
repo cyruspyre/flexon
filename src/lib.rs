@@ -35,7 +35,8 @@ pub use {
 pub use serde::{
     from_mut_null_padded, from_mut_slice, from_mut_slice_unchecked, from_mut_str, from_null_padded,
     from_reader, from_reader_unchecked, from_slice, from_slice_unchecked, from_str, get_from,
-    get_from_unchecked, get_with_parser, get_with_parser_unchecked,
+    get_from_seed, get_from_seed_unchecked, get_from_unchecked, get_with_parser,
+    get_with_parser_seed, get_with_parser_seed_unchecked, get_with_parser_unchecked,
 };
 
 #[cfg(feature = "comment")]

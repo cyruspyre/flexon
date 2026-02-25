@@ -1300,3 +1300,85 @@ where
 {
     get_with_parser_unchecked(path, &mut Parser::new(src))
 }
+
+/// Skips to the given path and deserializes the type using the provided parser & seed.
+///
+/// Same as [`get_from_seed`] but takes parser as an argument.
+/// Useful in case you want to modify the default parsing behaviour.
+pub fn get_with_parser_seed<'a, S, C, T, P>(
+    path: P,
+    seed: T,
+    parser: &mut Parser<'a, S, C>,
+) -> Result<T::Value>
+where
+    S: Source + 'a,
+    C: Config,
+    T: DeserializeSeed<'a>,
+    P: IntoIterator,
+    P::Item: JsonPointer,
+{
+    parser.skip_to(path)?;
+    parser.dec();
+    seed.deserialize(parser)
+}
+
+/// Skips to the given path and deserializes the type using the provided parser & seed.
+///
+/// Similar to [`get_with_parser_seed`], but without validation.
+/// This function's behavior is undefined if any of the following conditions are not met:
+///
+/// - The JSON must be valid.
+/// - The path must exist.
+/// - The specified type must be deserializable from the provided JSON data.
+pub unsafe fn get_with_parser_seed_unchecked<'a, S, C, T, P>(
+    path: P,
+    seed: T,
+    parser: &mut Parser<'a, S, C>,
+) -> T::Value
+where
+    S: Source + 'a,
+    C: Config,
+    T: DeserializeSeed<'a>,
+    P: IntoIterator,
+    P::Item: JsonPointer,
+{
+    parser.skip_to_unchecked(path);
+    parser.dec();
+    seed.deserialize(&mut Unchecked(parser)).unwrap_unchecked()
+}
+
+/// Skips to the given path and deserializes the specified type using a seed.
+///
+/// Similar to [`get_from`], but uses a seed for deserialization.
+/// Useful when you want to parse only a portion of the JSON data. This will
+/// skip and validate the JSON as it moves forward and return early. As such,
+/// any trailing data is ignored. Returns error if the path does not exist.
+#[inline]
+pub fn get_from_seed<'a, S, T, P>(src: S, path: P, seed: T) -> Result<T::Value>
+where
+    S: Source + 'a,
+    T: DeserializeSeed<'a>,
+    P: IntoIterator,
+    P::Item: JsonPointer,
+{
+    get_with_parser_seed(path, seed, &mut Parser::new(src))
+}
+
+/// Skips to the given path and deserializes the specified type using a seed.
+///
+/// Similar to [`get_from_seed`], but without validation.
+/// This function's behavior is undefined if any of the following conditions are not met:
+///
+/// - The JSON must be valid.
+/// - The path must exist.
+/// - The specified type must be deserializable from the provided JSON data.
+#[inline]
+pub unsafe fn get_from_seed_unchecked<'a, S, T, P>(src: S, path: P, seed: T) -> T::Value
+where
+    S: Source + 'a,
+    T: DeserializeSeed<'a>,
+    P: IntoIterator,
+    P::Item: JsonPointer,
+{
+    get_with_parser_seed_unchecked(path, seed, &mut Parser::new(src))
+}
