@@ -1227,6 +1227,7 @@ where
 
 /// Skips to the given path and deserializes the type using the provided parser.
 ///
+/// Similar to [`get_with_parser`], but without validation.
 /// This function's behavior is undefined if any of the following conditions are not met:
 ///
 /// - The JSON must be valid.
