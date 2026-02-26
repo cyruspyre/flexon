@@ -322,6 +322,17 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline(always)]
+    pub(crate) fn dec_if_not_empty(&mut self) {
+        unsafe {
+            let tmp = (self.src.len() != 0) as _;
+            match S::NULL_PADDED {
+                true => self.cur.ptr = self.cur.ptr.sub(tmp),
+                _ => self.cur.idx = self.cur.idx.wrapping_sub(tmp),
+            }
+        }
+    }
+
+    #[inline(always)]
     pub(crate) fn idx(&mut self) -> usize {
         unsafe {
             match S::NULL_PADDED {

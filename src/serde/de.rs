@@ -129,7 +129,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             return Err(tmp);
         }
 
-        let tmp = match S::NULL_PADDED || self.idx() + 3 < self.src.len() {
+        let tmp = match S::NULL_PADDED || self.idx().wrapping_add(3) < self.src.len() {
             true => 'tmp: {
                 self.inc(3);
                 return match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
@@ -1311,7 +1311,7 @@ where
     P::Item: JsonPointer,
 {
     parser._skip_to(path)?;
-    parser.dec();
+    parser.dec_if_not_empty();
     T::deserialize(parser)
 }
 

@@ -36,7 +36,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         P::Item: JsonPointer,
     {
         self._skip_to(p)?;
-        self.dec();
+        self.dec_if_not_empty();
         Ok(())
     }
 
