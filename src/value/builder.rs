@@ -34,13 +34,10 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
 
     /// Creates a value by the given byte slice.
     ///
-    /// Called when [`CUSTOM_LITERAL`](Self::CUSTOM_LITERAL) is `true`. A literal can be made of anything that
-    /// isn't either of the following sequentially:
+    /// Called when [`CUSTOM_LITERAL`](Self::CUSTOM_LITERAL) is `true`. The provided byte slice
+    /// contains only contiguous ASCII bytes, excluding the following:
     ///
-    /// `'{'`, `'}'`, `'['`, `']'`, `'"'`, `':'`, `','`, `' '`, `'\t'`, `'\n'`, `'\r'`, `'\0'`
-    ///
-    /// As an additional note, the literals may also include non UTF-8 bytes.
-    /// UTF-8 validation is performed only at string types.
+    /// `'{'`, `'}'`, `'['`, `']'`, `'"'`, `':'`, `','`, `'/'`, `' '`, `'\n'`, `'\t'`, `'\r'`, `'\0'`
     fn literal(s: &'a [u8]) -> Result<Self, Self::Error>;
 
     /// Creates a value by the given integer value.

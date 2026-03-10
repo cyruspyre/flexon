@@ -3,14 +3,14 @@
 #[cfg(target_arch = "x86_64")]
 use core::{
     arch::x86_64::{
-        _SIDD_CMP_EQUAL_ANY, _SIDD_NEGATIVE_POLARITY, _mm_and_si128, _mm_clmulepi64_si128,
-        _mm_cmpeq_epi8, _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_load_si128,
-        _mm_loadl_epi64, _mm_loadu_si128, _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8,
-        _mm_or_si128, _mm_packus_epi32, _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8,
-        _mm_setr_epi16, _mm_setzero_si128, _mm_shuffle_epi8, _mm_slli_si128, _mm_storeu_si128,
-        _mm_sub_epi8, _mm_subs_epu8, _mm_xor_si128, _mm256_and_si256, _mm256_cmpeq_epi8,
-        _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8, _mm256_setzero_si256,
-        _mm256_sub_epi8, _mm256_zeroupper,
+        _SIDD_NEGATIVE_POLARITY, _mm_and_si128, _mm_clmulepi64_si128, _mm_cmpeq_epi8, _mm_cmpestri,
+        _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_load_si128, _mm_loadl_epi64,
+        _mm_loadu_si128, _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8, _mm_or_si128,
+        _mm_packus_epi32, _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8, _mm_setr_epi16,
+        _mm_setzero_si128, _mm_shuffle_epi8, _mm_slli_si128, _mm_storeu_si128, _mm_sub_epi8,
+        _mm_subs_epu8, _mm_xor_si128, _mm256_and_si256, _mm256_cmpeq_epi8, _mm256_loadu_si256,
+        _mm256_movemask_epi8, _mm256_set1_epi8, _mm256_setzero_si256, _mm256_sub_epi8,
+        _mm256_zeroupper,
     },
     hint::unreachable_unchecked,
 };
@@ -24,6 +24,7 @@ use crate::{
 
 const ONES: u64 = 0x0101_0101_0101_0101;
 const HIGH: u64 = 0x8080_8080_8080_8080;
+const LOW: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 
 #[inline(always)]
 pub fn simd_u64(ptr: *const u8) -> Option<u64> {
@@ -178,17 +179,17 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse4.2")]
     unsafe fn wh_sse4_2(&mut self) -> bool {
-        const WHITESPACES: [u8; 16] = [
-            b' ', b'\n', b'\t', b'\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
+        let needle = _mm_setr_epi8(
+            0x20, 0x0A, 0x09, 0x0D, // ' '  | '\n' | '\t' | '\r'
+            0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
+            0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
+            0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
+        );
 
         if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
             self.inc(1);
-            let idx = _mm_cmpistri(
-                _mm_load_si128(WHITESPACES.as_ptr().cast()),
-                _mm_loadu_si128(self.cur_ptr().cast()),
-                _SIDD_NEGATIVE_POLARITY,
-            );
+            let chunk = _mm_loadu_si128(self.cur_ptr().cast());
+            let idx = _mm_cmpistri(needle, chunk, _SIDD_NEGATIVE_POLARITY);
 
             if idx != 16 {
                 self.inc(idx as u32 as _);
@@ -235,29 +236,24 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     #[inline]
     fn wh_swar(&mut self) -> bool {
-        const A: u64 = b' ' as u64 * ONES;
-        const B: u64 = b'\t' as u64 * ONES;
-        const C: u64 = b'\n' as u64 * ONES;
-        const D: u64 = b'\r' as u64 * ONES;
-
         if S::NULL_PADDED || self.idx() + 8 < self.src.len() {
             self.inc(1);
             let chunk = unsafe { self.cur_ptr().cast::<u64>().read_unaligned() };
 
-            let a = chunk ^ A;
-            let b = chunk ^ B;
-            let c = chunk ^ C;
-            let d = chunk ^ D;
+            let a = chunk ^ (b' ' as u64 * ONES);
+            let b = chunk ^ (b'\n' as u64 * ONES);
+            let c = chunk ^ (b'\t' as u64 * ONES);
+            let d = chunk ^ (b'\r' as u64 * ONES);
 
-            let a = a.wrapping_sub(ONES) & !a & HIGH;
-            let b = b.wrapping_sub(ONES) & !b & HIGH;
-            let c = c.wrapping_sub(ONES) & !c & HIGH;
-            let d = d.wrapping_sub(ONES) & !d & HIGH;
+            let a = !(a & LOW).wrapping_add(LOW) & !(a & HIGH);
+            let b = !(b & LOW).wrapping_add(LOW) & !(b & HIGH);
+            let c = !(c & LOW).wrapping_add(LOW) & !(c & HIGH);
+            let d = !(d & LOW).wrapping_add(LOW) & !(d & HIGH);
 
-            let mask = a | b | c | d;
+            let mask = !(a | b | c | d) & HIGH;
 
-            if mask != HIGH {
-                self.inc((!mask & HIGH).trailing_zeros() as usize >> 3);
+            if mask != 0 {
+                self.inc(mask.trailing_zeros() as usize >> 3);
                 return true;
             }
 
@@ -272,72 +268,100 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     #[inline]
     pub(crate) fn simd_lit(&mut self) -> bool {
         #[cfg(target_arch = "x86_64")]
-        {
-            // todo: try sse2 or ssse3
+        unsafe {
             #[cfg(feature = "runtime-detection")]
             return if is_x86_feature_detected!("sse4.2") {
-                unsafe { self.lit_sse4_2() }
+                self.lit_sse4_2()
             } else {
-                self.lit_lut()
+                self.lit_sse2()
             };
 
             #[cfg(not(feature = "runtime-detection"))]
             {
                 #[cfg(all(feature = "simd", target_feature = "sse4.2"))]
-                return unsafe { self.lit_sse4_2() };
+                return self.lit_sse4_2();
 
                 #[cfg(not(all(feature = "simd", target_feature = "sse4.2")))]
-                return self.lit_lut();
+                return self.lit_sse2();
             }
         }
 
         #[cfg(not(target_arch = "x86_64"))]
-        self.lit_lut()
+        false
     }
 
     #[inline]
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse4.2")]
     unsafe fn lit_sse4_2(&mut self) -> bool {
-        if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
-            const SPECIALS: [u8; 16] = [
-                b'{', b'}', b'[', b']', b'"', b':', b',', b' ', b'\n', b'\t', b'\r', 0, 0, 0, 0, 0,
-            ];
+        let needle = _mm_setr_epi8(
+            0x7B, 0x7D, 0x5B, 0x5D, // '{'  | '}'  | '['  | ']'
+            0x20, 0x22, 0x3A, 0x2C, // ' '  | '"'  | ':'  | ','
+            0x0A, 0x09, 0x0D, 0x00, // '\n' | '\t' | '\r' | '\0'
+            0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
+        );
 
-            let idx = _mm_cmpistri(
-                _mm_load_si128(SPECIALS.as_ptr().cast()),
-                _mm_loadu_si128(self.cur_ptr().add(1).cast()),
-                _SIDD_CMP_EQUAL_ANY,
-            );
+        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
+            let chunk = _mm_loadu_si128(self.cur_ptr().cast());
+            let idx = _mm_cmpestri(needle, 12, chunk, 16, 0);
 
             if idx != 16 {
                 self.inc(idx as u32 as _);
                 return true;
             }
 
-            self.inc(16)
+            self.inc(16);
         }
 
         false
     }
 
-    #[inline(always)]
-    fn lit_lut(&mut self) -> bool {
-        if S::NULL_PADDED || self.idx() + 2 < self.src.len() {
-            let ptr = self.cur_ptr();
+    #[inline]
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn lit_sse2(&mut self) -> bool {
+        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
+            let chunk = _mm_loadu_si128(self.cur_ptr().cast());
+            let mask = _mm_movemask_epi8(_mm_or_si128(
+                _mm_or_si128(
+                    _mm_or_si128(
+                        // '{', '}', '[', ']'
+                        _mm_cmpeq_epi8(
+                            _mm_and_si128(
+                                _mm_sub_epi8(chunk, _mm_set1_epi8(91)),
+                                _mm_set1_epi8(-35),
+                            ),
+                            _mm_setzero_si128(),
+                        ),
+                        // '\t', '\r'
+                        _mm_cmpeq_epi8(
+                            _mm_and_si128(chunk, _mm_set1_epi8(-33)),
+                            _mm_setzero_si128(),
+                        ),
+                    ),
+                    // ' ', '\0'
+                    _mm_cmpeq_epi8(_mm_and_si128(chunk, _mm_set1_epi8(-5)), _mm_set1_epi8(9)),
+                ),
+                _mm_or_si128(
+                    _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'\n' as i8)),
+                    _mm_or_si128(
+                        _mm_or_si128(
+                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'"' as i8)),
+                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b':' as i8)),
+                        ),
+                        _mm_or_si128(
+                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b',' as i8)),
+                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'/' as i8)),
+                        ),
+                    ),
+                ),
+            ));
 
-            let a = unsafe { *ptr.add(1) };
-            let b = unsafe { *ptr.add(2) };
-
-            let a = !NON_LIT_LUT[a as usize];
-            let b = !NON_LIT_LUT[b as usize];
-
-            if a & b {
-                self.inc(2);
-                return false;
+            if mask != 0 {
+                self.inc(mask.trailing_zeros() as _);
+                return true;
             }
-
-            self.inc(a as _)
+            self.inc(16);
         }
 
         false
@@ -809,9 +833,9 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         let mut tail = [0u8; 16];
 
         #[inline(always)]
-        pub unsafe fn pow(num: usize) -> u64 {
+        pub unsafe fn pow10(num: usize) -> u64 {
             match num {
-                0 => 0,
+                0 => 1,
                 1 => 10,
                 2 => 100,
                 3 => 1000,
@@ -833,7 +857,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         loop {
-            let ptr = if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
+            let ptr = if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
                 self.cur_ptr()
             } else {
                 // this wont run twice cause after this the number of
@@ -883,8 +907,8 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
             let mut res = [0u32; 4];
             _mm_storeu_si128(res.as_mut_ptr().cast(), t4);
-            let chunk = res[0] * 100_000_000 + res[1];
-            *mantissa = mantissa.wrapping_mul(pow(count)).wrapping_add(chunk as _);
+            let chunk = res[0] as u64 * 100_000_000 + res[1] as u64;
+            *mantissa = mantissa.wrapping_mul(pow10(count)).wrapping_add(chunk);
 
             self.inc(count);
             if count != 16 {

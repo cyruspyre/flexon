@@ -271,7 +271,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {
-                self.dec();
                 return match val.is_finite() {
                     true => Ok(()),
                     _ => Err(E::number_overflow()),
@@ -312,15 +311,15 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     pub(crate) fn skip_literal_unchecked(&mut self) {
         loop {
-            self.inc(1);
-            if (!S::NULL_PADDED && self.idx() >= self.src.len()) || NON_LIT_LUT[self.cur() as usize]
+            if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()
+                || NON_LIT_LUT[self.cur() as usize]
             {
-                self.dec();
-                return;
+                return self.dec();
             }
 
+            self.inc(1);
             if self.simd_lit() {
-                return;
+                return self.dec();
             }
         }
     }
