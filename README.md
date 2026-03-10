@@ -217,7 +217,7 @@ canada:
 
 ### Lazy Value
 
-JSON values that are built lazily but still perform validation while parsing.
+JSON values that are built lazily but still perform validation while parsing. To be noted, `sonic_rs` doesn't validate number overflow nor does it validate unicode escape sequence.
 
 `cargo bench --bench deserialize_value "lazy"`
 

@@ -24,24 +24,34 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     ) -> Option<f64> {
         let mut n_digits = self.idx() - start;
         let mut exponent = 0;
+        let mut exp_number = 0;
         let int_end = self.idx();
 
-        if self.cur() == b'.' {
-            self.inc(1);
-            let stamp = self.idx();
+        match self.cur() {
+            b'.' => {
+                self.inc(1);
+                let stamp = self.idx();
+                self.parse_mantissa(&mut mantissa);
+                let tmp = self.idx() - stamp;
 
-            self.parse_mantissa(&mut mantissa);
-            let tmp = self.idx() - stamp;
+                if tmp == 0 {
+                    return None;
+                }
 
-            if tmp == 0 {
-                return None;
+                exponent = (tmp as i64).wrapping_neg();
+                n_digits += tmp;
+
+                if self.idx() != self.src.len() {
+                    match self.cur() {
+                        b'e' | b'E' => exp_number = self.parse_scientific()?,
+                        _ => self.dec(),
+                    }
+                }
             }
-
-            exponent = (tmp as i64).wrapping_neg();
-            n_digits += tmp;
+            b'e' | b'E' => exp_number = self.parse_scientific()?,
+            _ => {}
         }
 
-        let exp_number = self.parse_scientific()?;
         exponent += exp_number;
         let num = 'tmp: {
             if n_digits <= 19 {
@@ -98,6 +108,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 exponent += exp_number; // add back the explicit part
             }
 
+            self.dec();
             Number {
                 exponent,
                 mantissa,
@@ -129,10 +140,6 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
     #[inline(always)]
     unsafe fn parse_scientific(&mut self) -> Option<i64> {
-        if !S::NULL_PADDED && self.idx() == self.src.len() || !matches!(self.cur(), b'e' | b'E') {
-            return Some(0);
-        }
-
         self.inc(1);
         if !S::NULL_PADDED && self.idx() == self.src.len() {
             return None;
@@ -149,7 +156,6 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
         while S::NULL_PADDED || self.idx() != self.src.len() {
             let tmp = self.cur();
-
             if tmp < b'0' || tmp > b'9' {
                 break;
             }
@@ -162,6 +168,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             self.inc(1);
         }
 
+        self.dec();
         if flag {
             Some(if neg { -num } else { num })
         } else {

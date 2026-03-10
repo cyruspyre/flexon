@@ -10,6 +10,8 @@ use core::{
 };
 use std::io::Read;
 
+use simdutf8::compat::from_utf8;
+
 use crate::{
     config::{CTConfig, Config},
     misc::*,
@@ -714,14 +716,19 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         };
         let raw = from_raw_parts(self.src.ptr(start + 1), end - start - 1);
 
-        if !S::UTF8 && simdutf8::basic::from_utf8(raw).is_err() {
-            #[allow(unused_mut)]
-            let mut err = E::unexpected_token();
-
+        if !S::UTF8 {
             #[cfg(feature = "span")]
-            err.apply_span(start, end);
+            if let Err(utf) = from_utf8(raw) {
+                let mut err = E::unexpected_token();
+                let idx = start + utf.valid_up_to();
+                err.apply_span(idx, idx);
+                return Err(err);
+            }
 
-            return Err(err);
+            #[cfg(not(feature = "span"))]
+            if simdutf8::basic::from_utf8(raw).is_err() {
+                return Err(E::unexpected_token());
+            }
         }
 
         buf.on_final_chunk(from_raw_parts(self.src.ptr(offset), end - offset));
@@ -810,18 +817,22 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[allow(unused_mut)]
     unsafe fn literal<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         if V::CUSTOM_LITERAL {
-            const EXCLUDED: [bool; 256] = {
-                let mut tmp = [false; 256];
+            let start = self.idx();
+            let end = loop {
+                if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()
+                    || NON_LIT_LUT[self.cur() as usize]
+                {
+                    break self.idx();
+                }
 
-                tmp[b':' as usize] = true;
-                tmp[b',' as usize] = true;
-                tmp[b'}' as usize] = true;
-                tmp[b']' as usize] = true;
-
-                tmp
+                self.inc(1);
+                if self.simd_lit() {
+                    break self.idx();
+                }
             };
+            let len = end - start;
 
-            if EXCLUDED[self.cur() as usize] {
+            if len == 0 {
                 #[allow(unused_mut)]
                 let mut tmp = V::Error::unexpected_token();
                 #[cfg(feature = "span")]
@@ -829,23 +840,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 return Err(tmp);
             }
 
-            let start = self.idx();
-            let end = loop {
-                self.inc(1);
-
-                if (!S::NULL_PADDED && self.idx() >= self.src.len())
-                    || NON_LIT_LUT[self.cur() as usize]
-                {
-                    self.dec();
-                    break self.idx();
-                }
-
-                if self.simd_lit() {
-                    break self.idx();
-                }
-            };
-
-            return V::literal(from_raw_parts(self.src.ptr(start), end - start + 1));
+            self.dec();
+            return V::literal(from_raw_parts(self.src.ptr(start), len));
         }
 
         #[cfg(feature = "span")]
@@ -907,7 +903,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {
-                self.dec();
                 return if val.is_finite() {
                     let mut tmp = V::float(val);
 
@@ -974,7 +969,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let mut val = 0;
         let mut overflow = false;
 
-        while S::NULL_PADDED || self.idx() + 8 < self.src.len() {
+        while S::NULL_PADDED || self.idx() + 8 <= self.src.len() {
             let Some(chunk) = simd_u64(self.cur_ptr()) else {
                 break;
             };
@@ -1066,7 +1061,13 @@ impl<'a> Parser<'a, &'a str> {
     /// If the input is not valid UTF-8, the type of error returned is unspecified.
     #[inline]
     pub fn from_slice(s: &'a [u8]) -> Self {
-        Self::new(simdutf8::basic::from_utf8(s).unwrap_or_default())
+        // in case of invalid utf8 it will skip to the offending byte.
+        let mut tmp = unsafe { Self::new(from_utf8_unchecked(s)) };
+        if let Err(e) = from_utf8(s) {
+            tmp.inc(e.valid_up_to())
+        }
+        tmp
+        // Self::new(simdutf8::basic::from_utf8(s).unwrap_or_default())
     }
 
     /// Creates a parser from `&[u8]`, without validating UTF-8 encoding.
@@ -1086,7 +1087,13 @@ impl<'a> Parser<'a, &'a mut str> {
     /// Creates a parser from `&mut [u8]` with UTF-8 validation, may perform In-situ parsing.
     #[inline]
     pub fn from_mut_slice(s: &'a mut [u8]) -> Self {
-        Self::new(simdutf8::basic::from_utf8_mut(s).unwrap_or_default())
+        // in case of invalid utf8 it will skip to the offending byte.
+        let mut tmp = unsafe { Self::new(from_utf8_unchecked_mut(s)) };
+        if let Err(e) = from_utf8(tmp.src.as_bytes()) {
+            tmp.inc(e.valid_up_to())
+        }
+        tmp
+        // Self::new(simdutf8::basic::from_utf8_mut(s).unwrap_or_default())
     }
 
     /// Creates a parser from `&mut [u8]` without UTF-8 validation, may perform In-situ parsing.

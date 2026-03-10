@@ -112,7 +112,6 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {
-                self.dec();
                 return if val.is_finite() {
                     visitor.visit_f64(val)
                 } else {
