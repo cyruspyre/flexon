@@ -94,7 +94,7 @@ If you need JSON values to be parsed lazily, then they are available. Nothing is
 
 `span`: Enables span information on the parsed JSON data.
 
-`serde` (default): Implements serde specific APIs. Serialization not available. Probably in the future.
+`serde` (default): Implements serde specific APIs.
 
 `nightly`: Uses nightly features. Currently only `likely_unlikely` and `cold_path` are used.
 
