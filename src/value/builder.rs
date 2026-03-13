@@ -27,7 +27,7 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
     type Array: ArrayBuilder<Self> + Into<Self>;
 
     /// The object type used by this builder.
-    type Object: ObjectBuilder<'a, S, Self::Error> + Into<Self>;
+    type Object: ObjectBuilder<'a, Self::String, Self> + Into<Self>;
 
     /// The string type used by this builder.
     type String: StringBuilder<'a, S, Self::Error> + Into<Self>;
@@ -82,13 +82,7 @@ pub trait ArrayBuilder<V> {
 }
 
 /// Trait for building JSON object during parsing.
-pub trait ObjectBuilder<'a, S: Source, E: ErrorBuilder> {
-    /// The key type used by this builder.
-    type Key: StringBuilder<'a, S, E>;
-
-    /// The value type used by this builder.
-    type Value: ValueBuilder<'a, S, Error = E>;
-
+pub trait ObjectBuilder<'a, K, V> {
     /// Create a new object builder.
     fn new() -> Self;
 
@@ -101,7 +95,7 @@ pub trait ObjectBuilder<'a, S: Source, E: ErrorBuilder> {
     fn len(&self) -> usize;
 
     /// Adds a key-value to the object.
-    fn on_value(&mut self, key: Self::Key, val: Self::Value);
+    fn on_value(&mut self, key: K, val: V);
 
     /// Called when object parsing completes, e.g., for sorting.
     fn on_complete(&mut self);

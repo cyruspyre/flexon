@@ -432,7 +432,7 @@ impl<'a, S: Source<Volatility = NonVolatile>> ValueBuilder<'a, S> for Value<'a> 
 
     type Error = Error;
     type Array = _Array;
-    type Object = _Object<'a, S, Self>;
+    type Object = _Object;
     type String = _String;
 
     #[inline]
@@ -476,7 +476,7 @@ impl<'a> Into<Value<'a>> for _Array {
     }
 }
 
-impl<'a, S: Source<Volatility = NonVolatile>> Into<Value<'a>> for _Object<'a, S, Value<'a>> {
+impl<'a> Into<Value<'a>> for _Object {
     #[inline]
     fn into(self) -> Value<'a> {
         unimplemented!()

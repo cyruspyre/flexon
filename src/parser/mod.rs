@@ -227,7 +227,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             } else {
                 match char {
                     b'"' => self.string::<_, V::String, _>(),
-                    b'{' => self.object::<_, V::Object, _>(),
+                    b'{' => self.object(),
                     b'[' => self.array(),
                     0 => {
                         #[allow(unused_mut)]
@@ -275,7 +275,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         } else {
             match char {
                 b'"' => self.string_unchecked::<_, V::String, _>(),
-                b'{' => self.object_unchecked::<_, V::Object, _>(),
+                b'{' => self.object_unchecked(),
                 b'[' => self.array_unchecked(),
                 _ => self.literal_unchecked(),
             }
@@ -487,7 +487,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         unsafe {
             match self.skip_whitespace() {
                 b'"' => self.string::<_, V::String, V::Error>(),
-                b'{' => self.object::<_, V::Object, V::Error>(),
+                b'{' => self.object(),
                 b'[' => self.array(),
                 0 => {
                     #[allow(unused_mut)]
@@ -502,16 +502,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[allow(unused_mut)]
-    unsafe fn object<T, V, E>(&mut self) -> Result<T, E>
-    where
-        T: ValueBuilder<'a, S>,
-        V: ObjectBuilder<'a, S, E> + Into<T>,
-        E: ErrorBuilder,
-    {
+    unsafe fn object<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         #[cfg(feature = "span")]
         let start = self.idx();
         #[cfg(feature = "prealloc")]
-        let mut obj = V::with_capacity(self.prealloc);
+        let mut obj = V::Object::with_capacity(self.prealloc);
         #[cfg(not(feature = "prealloc"))]
         let mut obj = V::new();
         let mut tmp = self.skip_whitespace();
@@ -527,12 +522,12 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
         let mut err = loop {
             if tmp != b'"' {
-                break E::unexpected_token();
+                break V::Error::unexpected_token();
             }
 
-            let key = self.string::<_, V::Key, E>()?;
+            let key = self.string::<V::String, V::String, V::Error>()?;
             if self.skip_whitespace() != b':' {
-                break E::expected_colon();
+                break V::Error::expected_colon();
             }
 
             obj.on_value(key, self.value()?);
@@ -558,7 +553,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
                 #[cfg(feature = "span")]
                 self.dec();
-                break E::trailing_comma();
+                break V::Error::trailing_comma();
             }
 
             if comma || self.cfg.comma() {
@@ -566,8 +561,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             break match tmp {
-                0 => E::eof(),
-                _ => E::unexpected_token(),
+                0 => V::Error::eof(),
+                _ => V::Error::unexpected_token(),
             };
         };
 
@@ -596,7 +591,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let mut err = loop {
             arr.on_value(match tmp {
                 b'"' => self.string::<_, V::String, _>(),
-                b'{' => self.object::<_, V::Object, _>(),
+                b'{' => self.object(),
                 b'[' => self.array(),
                 0 => {
                     #[allow(unused_mut)]

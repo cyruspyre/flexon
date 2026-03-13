@@ -1,9 +1,7 @@
-use core::marker::PhantomData;
-
 use crate::{Error, source::Source, value::builder::*};
 
 pub struct _Array;
-pub struct _Object<'a, S: Source, V: ValueBuilder<'a, S>>(PhantomData<(&'a V, S)>);
+pub struct _Object;
 pub struct _String;
 
 impl<V> ArrayBuilder<V> for _Array {
@@ -29,22 +27,15 @@ impl<V> ArrayBuilder<V> for _Array {
     fn on_complete(&mut self) {}
 }
 
-impl<'a, S, V> ObjectBuilder<'a, S, Error> for _Object<'a, S, V>
-where
-    S: Source,
-    V: ValueBuilder<'a, S, Error = Error>,
-{
-    type Key = _String;
-    type Value = V;
-
+impl<'a, K, V> ObjectBuilder<'a, K, V> for _Object {
     #[inline]
     fn new() -> Self {
-        Self(PhantomData)
+        Self
     }
 
     #[inline]
     fn with_capacity(_: usize) -> Self {
-        Self(PhantomData)
+        Self
     }
 
     #[inline]
@@ -53,7 +44,7 @@ where
     }
 
     #[inline]
-    fn on_value(&mut self, _: Self::Key, _: Self::Value) {}
+    fn on_value(&mut self, _: K, _: V) {}
 
     #[inline]
     fn on_complete(&mut self) {}

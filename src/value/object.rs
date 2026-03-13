@@ -3,11 +3,11 @@ use core::{
     fmt::{Debug, Formatter, Result},
     ops::{Deref, Index, IndexMut},
     ptr::{dangling_mut, slice_from_raw_parts_mut},
-    slice::from_raw_parts_mut,
+    slice::{from_raw_parts, from_raw_parts_mut},
 };
 use std::alloc::{alloc, dealloc, realloc};
 
-use crate::{source::Source, value::builder::*};
+use crate::value::builder::*;
 
 /// Represents a JSON object.
 ///
@@ -19,8 +19,15 @@ pub struct Object<K, V> {
 }
 
 impl<K, V> Object<K, V> {
+    /// Returns the object as a slice of key-value pairs.
     #[inline]
-    fn as_slice(&self) -> &mut [(K, V)] {
+    pub fn as_slice(&self) -> &[(K, V)] {
+        unsafe { from_raw_parts(self.buf, self.len) }
+    }
+
+    /// Returns the object as a mutable slice of key-value pairs.
+    #[inline]
+    pub fn as_slice_mut(&self) -> &mut [(K, V)] {
         unsafe { from_raw_parts_mut(self.buf, self.len) }
     }
 
@@ -45,7 +52,7 @@ impl<K: Deref<Target = str>, V> Object<K, V> {
 
     /// Returns a mutable reference to the value associated with the given key, `None` otherwise.
     pub fn get_mut(&self, key: &str) -> Option<&mut V> {
-        for (k, v) in self.as_slice() {
+        for (k, v) in self.as_slice_mut() {
             if &**k == key {
                 return Some(v);
             }
@@ -67,7 +74,7 @@ impl<K: Deref<Target = str>, V> Object<K, V> {
 
     /// Returns a mutable reference to the key-value pair associated with the given key, `None` otherwise.
     pub fn get_key_value_mut(&mut self, key: &str) -> Option<(&mut K, &mut V)> {
-        for (k, v) in self.as_slice() {
+        for (k, v) in self.as_slice_mut() {
             if &**k == key {
                 return Some((k, v));
             }
@@ -77,16 +84,7 @@ impl<K: Deref<Target = str>, V> Object<K, V> {
     }
 }
 
-impl<'a, S, K, V, E> ObjectBuilder<'a, S, E> for Object<K, V>
-where
-    S: Source,
-    K: StringBuilder<'a, S, E>,
-    V: ValueBuilder<'a, S, Error = E>,
-    E: ErrorBuilder,
-{
-    type Key = K;
-    type Value = V;
-
+impl<'a, K, V> ObjectBuilder<'a, K, V> for Object<K, V> {
     #[inline]
     fn new() -> Self {
         Self {

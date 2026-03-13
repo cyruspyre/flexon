@@ -229,10 +229,7 @@ macro_rules! string_impl {
             }
         }
 
-        impl<$lt, S: crate::source::Source$(< Volatility = $volatility >)?> ObjectBuilder<$lt, S, Error> for $type {
-            type Key = Self;
-            type Value = Self;
-
+        impl<$lt, K, V> ObjectBuilder<$lt, K, V> for $type {
             #[inline]
             fn new() -> Self {
                 unimplemented!()
@@ -249,7 +246,7 @@ macro_rules! string_impl {
             }
 
             #[inline]
-            fn on_value(&mut self, _: Self::Key, _: Self::Value) {
+            fn on_value(&mut self, _: K, _: V) {
                 unimplemented!()
             }
 

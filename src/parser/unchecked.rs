@@ -13,29 +13,25 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         unsafe {
             match self.skip_whitespace() {
                 b'"' => self.string_unchecked::<_, V::String, V::Error>(),
-                b'{' => self.object_unchecked::<_, V::Object, V::Error>(),
+                b'{' => self.object_unchecked(),
                 b'[' => self.array_unchecked(),
                 _ => self.literal_unchecked(),
             }
         }
     }
 
-    pub(super) unsafe fn object_unchecked<T: ValueBuilder<'a, S>, V, E>(&mut self) -> T
-    where
-        V: ObjectBuilder<'a, S, E> + Into<T>,
-        E: ErrorBuilder,
-    {
+    pub(super) unsafe fn object_unchecked<V: ValueBuilder<'a, S>>(&mut self) -> V {
         #[cfg(feature = "prealloc")]
-        let mut obj = V::with_capacity(self.prealloc);
+        let mut obj = V::Object::with_capacity(self.prealloc);
         #[cfg(not(feature = "prealloc"))]
-        let mut obj = V::new();
+        let mut obj = V::Object::new();
         #[cfg(feature = "span")]
         let start = self.idx();
 
         loop {
             match self.skip_whitespace() {
                 b'"' => {
-                    obj.on_value(self.string_unchecked::<_, V::Key, E>(), {
+                    obj.on_value(self.string_unchecked::<V::String, V::String, V::Error>(), {
                         self.skip_whitespace();
                         self.value_unchecked()
                     });
