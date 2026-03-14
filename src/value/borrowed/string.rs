@@ -28,9 +28,10 @@ enum Inner<'a> {
 }
 
 impl<'a> String<'a> {
+    /// Creates a borrowed string from a string slice.
     #[inline]
-    pub(crate) fn from_slice(s: &'a [u8]) -> String<'a> {
-        String(Inner::Ref(s))
+    pub fn from_str(s: &'a str) -> String<'a> {
+        String(Inner::Ref(s.as_bytes()))
     }
 
     #[inline]

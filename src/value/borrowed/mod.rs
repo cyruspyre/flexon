@@ -4,9 +4,7 @@ mod string;
 
 use core::ops::{Index, IndexMut};
 
-use crate::pointer::JsonPointer;
-
-use super::misc::define_value;
+use crate::{pointer::JsonPointer, value::misc::define_value};
 
 pub use string::String;
 
@@ -18,6 +16,26 @@ define_value! {
 }
 
 impl<'a> Value<'a> {
+    /// Returns a reference to the value associated with the given index, `None` otherwise.
+    #[inline]
+    pub fn get<I: JsonPointer>(&self, idx: I) -> Option<&Value<'a>> {
+        match self {
+            Value::Array(v) => v.get(idx.as_index()?),
+            Value::Object(v) => v.get(idx.as_key()?),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the value associated with the given index, `None` otherwise.
+    #[inline]
+    pub fn get_mut<I: JsonPointer>(&mut self, idx: I) -> Option<&mut Value<'a>> {
+        match self {
+            Value::Array(v) => v.get_mut(idx.as_index()?),
+            Value::Object(v) => v.get_mut(idx.as_key()?),
+            _ => None,
+        }
+    }
+
     /// Returns `()` if it is a null, `None` otherwise.
     #[inline]
     pub fn as_null(&self) -> Option<()> {

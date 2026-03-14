@@ -1,4 +1,7 @@
-use core::{alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts};
+use core::{
+    alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts,
+    str::from_utf8_unchecked,
+};
 use std::alloc::{alloc, dealloc, realloc};
 
 use crate::{
@@ -341,10 +344,10 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         if !S::Volatility::IS_VOLATILE && len == 0 {
             return unsafe {
                 // utf-8 validation is unnecessary here its going to match against string slice
-                Ok(String::from_slice(from_raw_parts(
+                Ok(String::from_str(from_utf8_unchecked(from_raw_parts(
                     self.src.ptr(offset),
                     self.idx() - offset,
-                )))
+                ))))
             };
         }
 
@@ -443,7 +446,10 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
         if !S::Volatility::IS_VOLATILE && len == 0 {
             return unsafe {
-                String::from_slice(from_raw_parts(self.src.ptr(offset), self.idx() - offset))
+                String::from_str(from_utf8_unchecked(from_raw_parts(
+                    self.src.ptr(offset),
+                    self.idx() - offset,
+                )))
             };
         }
 

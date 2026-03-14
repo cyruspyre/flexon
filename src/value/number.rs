@@ -3,7 +3,7 @@ use core::fmt::{Debug, Formatter, Result};
 /// Represents a JSON number.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct Number(Kind);
+pub struct Number(pub(crate) Kind);
 
 #[derive(Clone, Copy)]
 pub enum Kind {

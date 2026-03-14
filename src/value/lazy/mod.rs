@@ -63,6 +63,35 @@ impl<'a> Raw<'a> {
 }
 
 impl<'a> Value<'a> {
+    /// Returns a mutable reference to the value associated with the given index, `None` otherwise.
+    #[inline]
+    pub fn get<I: JsonPointer>(&mut self, idx: I) -> Option<&mut Value<'a>> {
+        match self {
+            Value::Array(v) => v.get(idx.as_index()?),
+            Value::Object(v) => v.get(idx.as_key()?),
+            Value::Raw(Raw(v)) => match unsafe { *v.as_ptr() } {
+                b'[' => unsafe {
+                    *self = Self::Array(Array::new(v));
+
+                    match self {
+                        Self::Array(v) => v.get(idx.as_index()?),
+                        _ => unreachable_unchecked(),
+                    }
+                },
+                b'{' => unsafe {
+                    *self = Self::Object(Object::new(v));
+
+                    match self {
+                        Self::Object(v) => v.get(idx.as_key()?),
+                        _ => unreachable_unchecked(),
+                    }
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Returns unparsed raw JSON if it is still in raw form, `None` otherwise.
     #[inline]
     pub fn as_raw(&'a self) -> Option<Raw<'a>> {
@@ -323,7 +352,7 @@ impl<'a> Value<'a> {
                 return Some(match *self {
                     // valid borrowed string even if the original string is now in heap
                     // both of them will continue to live for the same lifetime
-                    Value::String(ref v) => Value::String(String::from_slice(v.as_bytes())),
+                    Value::String(ref v) => Value::String(String::from_str(v)),
                     Value::Null => Value::Null,
                     Value::Number(v) => Value::Number(v),
                     Value::Boolean(v) => Value::Boolean(v),

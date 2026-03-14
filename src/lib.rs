@@ -27,7 +27,7 @@ use crate::{pointer::JsonPointer, source::Source, value::builder::ValueBuilder};
 pub use {
     error::Error,
     parser::Parser,
-    value::{LazyValue, Value},
+    value::{LazyValue, OwnedValue, Value},
 };
 
 #[doc(inline)]
