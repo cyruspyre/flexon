@@ -189,7 +189,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         match tmp {
             b'"' => self.deserialize_str(visitor),
             b'{' => self.deserialize_map(visitor),
-            b'[' => self.deserialize_seq(visitor),
+            b'[' if self.idx().wrapping_add(2) < self.src.len() => self.deserialize_seq(visitor),
             0 => Err(self.err(Kind::Eof)),
             _ => unsafe { self.parse_literal(visitor) },
         }

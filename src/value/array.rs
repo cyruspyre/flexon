@@ -74,6 +74,30 @@ impl<V> ArrayBuilder<V> for Array<V> {
     fn on_complete(&mut self) {}
 }
 
+impl<V: Clone> Clone for Array<V> {
+    fn clone(&self) -> Self {
+        if self.len != 0 {
+            unsafe {
+                let buf: *mut V = alloc(Layout::array::<V>(self.cap).unwrap_unchecked()).cast();
+                for i in 0..self.len {
+                    buf.add(i).write((&*self.buf.add(i)).clone())
+                }
+                Self {
+                    buf,
+                    len: self.len,
+                    cap: self.cap,
+                }
+            }
+        } else {
+            Self {
+                buf: dangling_mut(),
+                len: 0,
+                cap: 0,
+            }
+        }
+    }
+}
+
 impl<V> Deref for Array<V> {
     type Target = [V];
 

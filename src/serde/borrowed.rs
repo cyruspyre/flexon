@@ -75,7 +75,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
 
             #[inline]
             fn visit_borrowed_str<E: Error>(self, v: &'de str) -> Result<Value<'de>, E> {
-                Ok(Value::String(String::from_str(v)))
+                Ok(Value::String(String::from(v)))
             }
 
             #[inline]
@@ -126,7 +126,7 @@ impl<'de> Deserialize<'de> for String<'de> {
 
             #[inline]
             fn visit_borrowed_str<E: Error>(self, v: &'de str) -> Result<String<'de>, E> {
-                Ok(String::from_str(v))
+                Ok(String::from(v))
             }
         }
 

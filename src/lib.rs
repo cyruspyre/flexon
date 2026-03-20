@@ -58,7 +58,7 @@ pub use comment::Comment;
 /// # Ok::<(), flexon::Error>(())
 /// ```
 #[inline]
-pub fn parse<'a, S: Source, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::Error> {
+pub fn parse<'a, S: Source + 'a, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::Error> {
     Parser::new(s).parse()
 }
 
@@ -78,7 +78,7 @@ pub fn parse<'a, S: Source, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::Error>
 #[inline]
 pub fn parse_at<'a, S, V, P>(s: S, p: P) -> Result<V, V::Error>
 where
-    S: Source,
+    S: Source + 'a,
     V: ValueBuilder<'a, S>,
     P: IntoIterator,
     P::Item: JsonPointer,

@@ -344,7 +344,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         if !S::Volatility::IS_VOLATILE && len == 0 {
             return unsafe {
                 // utf-8 validation is unnecessary here its going to match against string slice
-                Ok(String::from_str(from_utf8_unchecked(from_raw_parts(
+                Ok(String::from(from_utf8_unchecked(from_raw_parts(
                     self.src.ptr(offset),
                     self.idx() - offset,
                 ))))
@@ -446,7 +446,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
         if !S::Volatility::IS_VOLATILE && len == 0 {
             return unsafe {
-                String::from_str(from_utf8_unchecked(from_raw_parts(
+                String::from(from_utf8_unchecked(from_raw_parts(
                     self.src.ptr(offset),
                     self.idx() - offset,
                 )))

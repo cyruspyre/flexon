@@ -352,7 +352,7 @@ impl<'a> Value<'a> {
                 return Some(match *self {
                     // valid borrowed string even if the original string is now in heap
                     // both of them will continue to live for the same lifetime
-                    Value::String(ref v) => Value::String(String::from_str(v)),
+                    Value::String(ref v) => Value::String(String::from(v.as_str())),
                     Value::Null => Value::Null,
                     Value::Number(v) => Value::Number(v),
                     Value::Boolean(v) => Value::Boolean(v),

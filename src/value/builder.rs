@@ -27,7 +27,7 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
     type Array: ArrayBuilder<Self> + Into<Self>;
 
     /// The object type used by this builder.
-    type Object: ObjectBuilder<'a, Self::String, Self> + Into<Self>;
+    type Object: ObjectBuilder<Self::String, Self> + Into<Self>;
 
     /// The string type used by this builder.
     type String: StringBuilder<'a, S, Self::Error> + Into<Self>;
@@ -82,7 +82,7 @@ pub trait ArrayBuilder<V> {
 }
 
 /// Trait for building JSON object during parsing.
-pub trait ObjectBuilder<'a, K, V> {
+pub trait ObjectBuilder<K, V> {
     /// Create a new object builder.
     fn new() -> Self;
 

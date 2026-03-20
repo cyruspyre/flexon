@@ -355,6 +355,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline(always)]
+    #[cfg(feature = "serde")]
     pub(crate) fn cur_ptr_mut(&mut self) -> *mut u8 {
         unsafe {
             match S::NULL_PADDED {
@@ -508,7 +509,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         #[cfg(feature = "prealloc")]
         let mut obj = V::Object::with_capacity(self.prealloc);
         #[cfg(not(feature = "prealloc"))]
-        let mut obj = V::new();
+        let mut obj = V::Object::new();
         let mut tmp = self.skip_whitespace();
 
         if tmp == b'}' {

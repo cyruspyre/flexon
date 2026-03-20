@@ -45,6 +45,7 @@ macro_rules! define_value {
         };
 
         $(#[$meta])*
+        #[derive(Clone)]
         pub enum $name $(<$name_lt>)? {
             /// Represents a JSON null value.
             Null,
@@ -229,7 +230,7 @@ macro_rules! string_impl {
             }
         }
 
-        impl<$lt, K, V> ObjectBuilder<$lt, K, V> for $type {
+        impl<$lt, K, V> ObjectBuilder<K, V> for $type {
             #[inline]
             fn new() -> Self {
                 unimplemented!()

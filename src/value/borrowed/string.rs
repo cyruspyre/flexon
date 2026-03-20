@@ -28,12 +28,6 @@ enum Inner<'a> {
 }
 
 impl<'a> String<'a> {
-    /// Creates a borrowed string from a string slice.
-    #[inline]
-    pub fn from_str(s: &'a str) -> String<'a> {
-        String(Inner::Ref(s.as_bytes()))
-    }
-
     #[inline]
     pub(crate) fn from_raw_parts(buf: *mut u8, len: usize, cap: usize) -> Self {
         Self(Inner::Heap { buf, len, cap })
@@ -152,6 +146,53 @@ where
 }
 
 string_impl!(String<'a>, 'a);
+
+impl<'a> From<&'a str> for String<'a> {
+    /// Creates a borrowed string from the string slice.
+    #[inline]
+    fn from(value: &'a str) -> Self {
+        String(Inner::Ref(value.as_bytes()))
+    }
+}
+
+impl Into<std::string::String> for String<'_> {
+    /// Converts itself into [`String`](std::string::String).
+    ///
+    /// This does not allocate or copy memory if the string is already owned.
+    #[inline]
+    fn into(self) -> std::string::String {
+        use std::string::String;
+
+        unsafe {
+            match self.0 {
+                Inner::Ref(v) => String::from_utf8_unchecked(v.into()),
+                Inner::Heap { buf, len, cap } => String::from_raw_parts(buf, len, cap),
+            }
+        }
+    }
+}
+
+impl Clone for String<'_> {
+    #[inline]
+    fn clone(&self) -> Self {
+        match self.0 {
+            Inner::Ref(items) => Self(Inner::Ref(items)),
+            Inner::Heap { buf: src, len, .. } => Self(if len != 0 {
+                unsafe {
+                    let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+                    buf.copy_from_nonoverlapping(src, len);
+                    Inner::Heap { buf, len, cap: len }
+                }
+            } else {
+                Inner::Heap {
+                    buf: dangling_mut(),
+                    len: 0,
+                    cap: 0,
+                }
+            }),
+        }
+    }
+}
 
 impl Drop for String<'_> {
     fn drop(&mut self) {

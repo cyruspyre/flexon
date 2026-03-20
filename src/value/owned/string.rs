@@ -152,6 +152,28 @@ where
 
 string_impl!(String);
 
+impl Clone for String {
+    #[inline]
+    fn clone(&self) -> Self {
+        match self.0 {
+            Inner::Stack { buf, len } => Self(Inner::Stack { buf, len }),
+            Inner::Heap { buf: src, len, .. } => Self(if len != 0 {
+                unsafe {
+                    let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+                    buf.copy_from_nonoverlapping(src, len);
+                    Inner::Heap { buf, len, cap: len }
+                }
+            } else {
+                Inner::Heap {
+                    buf: dangling_mut(),
+                    len: 0,
+                    cap: 0,
+                }
+            }),
+        }
+    }
+}
+
 impl Drop for String {
     fn drop(&mut self) {
         if let Inner::Heap { buf, cap, .. } = self.0

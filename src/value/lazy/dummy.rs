@@ -27,7 +27,7 @@ impl<V> ArrayBuilder<V> for _Array {
     fn on_complete(&mut self) {}
 }
 
-impl<'a, K, V> ObjectBuilder<'a, K, V> for _Object {
+impl<K, V> ObjectBuilder<K, V> for _Object {
     #[inline]
     fn new() -> Self {
         Self

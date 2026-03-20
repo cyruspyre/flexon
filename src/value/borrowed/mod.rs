@@ -2,7 +2,10 @@
 
 mod string;
 
-use core::ops::{Index, IndexMut};
+use core::{
+    mem::replace,
+    ops::{Index, IndexMut},
+};
 
 use crate::{pointer::JsonPointer, value::misc::define_value};
 
@@ -16,6 +19,12 @@ define_value! {
 }
 
 impl<'a> Value<'a> {
+    /// Returns the value out of self leaving [`Value::Null`] behind.
+    #[inline]
+    pub fn take(&mut self) -> Value<'a> {
+        replace(self, Value::Null)
+    }
+
     /// Returns a reference to the value associated with the given index, `None` otherwise.
     #[inline]
     pub fn get<I: JsonPointer>(&self, idx: I) -> Option<&Value<'a>> {
@@ -248,7 +257,7 @@ impl<'a> Index<usize> for Value<'a> {
     }
 }
 
-impl<'a> IndexMut<usize> for Value<'a> {
+impl IndexMut<usize> for Value<'_> {
     #[inline]
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         match self.as_array_mut() {
@@ -276,7 +285,7 @@ impl<'a> Index<&str> for Value<'a> {
     }
 }
 
-impl<'a> IndexMut<&str> for Value<'a> {
+impl IndexMut<&str> for Value<'_> {
     #[inline]
     fn index_mut(&mut self, key: &str) -> &mut Self::Output {
         match self.as_object_mut() {
