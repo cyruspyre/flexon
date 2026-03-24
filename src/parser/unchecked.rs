@@ -138,22 +138,21 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         if V::CUSTOM_LITERAL {
             let start = self.idx();
             let end = loop {
-                self.inc(1);
-
-                if (S::NULL_PADDED || self.idx() >= self.src.len())
+                if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()
                     || NON_LIT_LUT[self.cur() as usize]
                 {
-                    self.dec();
                     break self.idx();
                 }
 
+                self.inc(1);
                 if self.simd_lit() {
                     break self.idx();
                 }
             };
+            let len = end - start;
 
-            return V::literal(from_raw_parts(self.src.ptr(start), end - start + 1))
-                .unwrap_unchecked();
+            self.dec();
+            return V::literal(from_raw_parts(self.src.ptr(start), len)).unwrap_unchecked();
         }
 
         #[cfg(feature = "span")]
@@ -168,21 +167,30 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             let start = self.idx();
             let (val, is_int) = self.parse_u64();
-            let mut num = match is_int {
-                true => V::integer(
-                    match neg {
-                        true => val.wrapping_neg(),
-                        _ => val,
-                    },
-                    neg,
-                ),
-                _ => V::float(self.parse_f64(val, neg, start).unwrap_unchecked()),
-            };
 
-            self.dec();
+            'int: {
+                if is_int {
+                    self.dec();
+                    let mut tmp = if neg {
+                        if val > 9223372036854775808 {
+                            break 'int;
+                        }
+
+                        V::integer(val.wrapping_neg(), true)
+                    } else {
+                        V::integer(val, false)
+                    };
+
+                    #[cfg(feature = "span")]
+                    tmp.apply_span(stamp, self.idx());
+                    return tmp;
+                }
+            }
+
+            let mut tmp = V::float(self.parse_f64(val, neg, start).unwrap_unchecked());
             #[cfg(feature = "span")]
-            num.apply_span(stamp, self.idx());
-            return num;
+            tmp.apply_span(stamp, self.idx());
+            return tmp;
         }
 
         let mut tmp = match self.cur() {

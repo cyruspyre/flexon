@@ -94,7 +94,7 @@ macro_rules! define_value {
                 $name::Number(val)
             }
         }
-        
+
         impl $(<$name_lt>)? From<$str> for $name $(<$name_lt>)? {
             #[inline(always)]
             fn from(val: $str) -> $name $(<$name_lt>)? {

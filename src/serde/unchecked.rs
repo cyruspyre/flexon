@@ -60,16 +60,23 @@ impl<S: Source, C: Config> Unchecked<'_, '_, S, C> {
 
             let start = self.idx();
             let (val, is_int) = self.parse_u64();
-            let num = match is_int {
-                true => match neg {
-                    true => visitor.visit_i64(val.wrapping_neg() as _),
-                    _ => visitor.visit_u64(val),
-                },
-                _ => visitor.visit_f64(self.parse_f64(val, neg, start).unwrap_unchecked()),
-            };
 
-            self.dec();
-            return num;
+            'int: {
+                if is_int {
+                    self.dec();
+                    return if neg {
+                        if val > 9223372036854775808 {
+                            break 'int;
+                        }
+
+                        visitor.visit_i64(val.wrapping_neg() as _)
+                    } else {
+                        visitor.visit_u64(val)
+                    };
+                }
+            }
+
+            return visitor.visit_f64(self.parse_f64(val, neg, start).unwrap_unchecked());
         }
 
         let tmp = match self.cur() {
@@ -610,21 +617,18 @@ impl<'a, 'de, S: Source, C: Config> de::VariantAccess<'de> for UnitVariantAccess
 pub struct Error;
 
 impl Debug for Error {
-    #[inline]
     fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
 impl Display for Error {
-    #[inline]
     fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
 impl de::Error for Error {
-    #[inline]
     fn custom<T: Display>(_: T) -> Self {
         Self
     }
