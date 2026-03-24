@@ -82,6 +82,10 @@ println!("{} bought an item that costs {}!!", customer.name, item_price);
 
 If you need JSON values to be parsed lazily, then they are available. Nothing is parsed until they are queried/accessed (They are actually parsed and validated but not materialized). As a side effect, you can get raw numbers using them.
 
+### Serialization
+
+Same as other crates, nothing fancy.
+
 ## Features
 
 `simd` (default): Enables hardware specific SIMD. Things like SWAR will still be used even if it is disabled. On `x86_64`, SSE2 is used regardless of this flag as it is a baseline feature.
@@ -289,4 +293,28 @@ canada:
     sonic_rs::get_from (lazy)               1.3613 ms   1.5401 GiB/s
     flexon::get_from (serde)                2.8571 ms   751.39 MiB/s
     flexon::get_from (lazy)                 2.9049 ms   739.02 MiB/s
+```
+
+## Serialize
+
+This serializes Rust struct into JSON using serde API.
+
+`cargo bench --bench serialize_struct`
+
+```
+twitter:
+    flexon::to_string                       416.12 µs    1.4134 GiB/s
+    sonic_rs::to_string                     334.15 µs    1.7601 GiB/s
+    serde_json::to_string                   440.55 µs    1.3350 GiB/s
+    simd_json::to_string                    471.48 µs    1.2474 GiB/s
+citm_catalog:
+    serde_json::to_string                   528.57 µs    3.0433 GiB/s
+    flexon::to_string                       554.49 µs    2.9010 GiB/s
+    simd_json::to_string                    542.07 µs    2.9675 GiB/s
+    sonic_rs::to_string                     592.23 µs    2.7162 GiB/s
+canada:
+    serde_json::to_string                   3.0939 ms   693.88 MiB/s
+    flexon::to_string                       3.1101 ms   690.25 MiB/s
+    simd_json::to_string                    3.8625 ms   555.80 MiB/s
+    sonic_rs::to_string                     4.0747 ms   526.86 MiB/s
 ```
