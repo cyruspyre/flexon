@@ -12,10 +12,11 @@ use crate::{pointer::JsonPointer, value::misc::define_value};
 pub use string::String;
 
 define_value! {
+    /// Represents a borrowed JSON value.
     name: Value<'a>,
-    key_str: String<'a>,
-    val_str: String<'a>,
+    string: String<'a>,
     lifetime: 'a,
+    volatility: NonVolatile,
 }
 
 impl<'a> Value<'a> {

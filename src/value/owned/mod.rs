@@ -2,19 +2,29 @@
 
 mod string;
 
-use core::ops::{Index, IndexMut};
+use core::{
+    mem::replace,
+    ops::{Index, IndexMut},
+};
 
 use crate::{pointer::JsonPointer, value::misc::define_value};
 
 pub use string::String;
 
 define_value! {
+    /// Represents an owned JSON value.
     name: Value,
-    key_str: String,
-    val_str: String,
+    string: String,
+    lifetime: '_,
 }
 
 impl Value {
+    /// Returns the value out of self leaving [`Value::Null`] behind.
+    #[inline]
+    pub fn take(&mut self) -> Value {
+        replace(self, Value::Null)
+    }
+
     /// Returns a reference to the value associated with the given index, `None` otherwise.
     #[inline]
     pub fn get<I: JsonPointer>(&self, idx: I) -> Option<&Value> {

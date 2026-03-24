@@ -152,6 +152,53 @@ where
 
 string_impl!(String);
 
+impl From<&str> for String {
+    #[inline]
+    fn from(value: &str) -> Self {
+        unsafe {
+            let ptr = value.as_ptr();
+            let len = value.len();
+
+            String(if len <= 30 {
+                let mut buf = [0; 30];
+                buf.as_mut_ptr().copy_from_nonoverlapping(ptr, len);
+
+                Inner::Stack { buf, len: len as _ }
+            } else {
+                // non zero allocation
+                let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+                buf.copy_from_nonoverlapping(ptr, len);
+
+                Inner::Heap { buf, len, cap: len }
+            })
+        }
+    }
+}
+
+impl From<std::string::String> for String {
+    #[inline]
+    fn from(value: std::string::String) -> Self {
+        let (buf, len, cap) = value.into_raw_parts();
+        Self(Inner::Heap { buf, len, cap })
+    }
+}
+
+impl From<String> for std::string::String {
+    #[inline]
+    fn from(value: String) -> Self {
+        use std::string::String;
+
+        unsafe {
+            match value.0 {
+                Inner::Stack { buf, len } => {
+                    String::from_utf8_unchecked(buf.get_unchecked(..len as usize).into())
+                }
+                Inner::Heap { buf, len, cap } => String::from_raw_parts(buf, len, cap),
+            }
+        }
+    }
+}
+
 impl Clone for String {
     #[inline]
     fn clone(&self) -> Self {

@@ -155,16 +155,24 @@ impl<'a> From<&'a str> for String<'a> {
     }
 }
 
-impl Into<std::string::String> for String<'_> {
-    /// Converts itself into [`String`](std::string::String).
+impl From<std::string::String> for String<'_> {
+    #[inline]
+    fn from(value: std::string::String) -> Self {
+        let (buf, len, cap) = value.into_raw_parts();
+        Self(Inner::Heap { buf, len, cap })
+    }
+}
+
+impl From<String<'_>> for std::string::String {
+    /// Converts the value into [`String`](std::string::String).
     ///
     /// This does not allocate or copy memory if the string is already owned.
     #[inline]
-    fn into(self) -> std::string::String {
+    fn from(value: String<'_>) -> Self {
         use std::string::String;
 
         unsafe {
-            match self.0 {
+            match value.0 {
                 Inner::Ref(v) => String::from_utf8_unchecked(v.into()),
                 Inner::Heap { buf, len, cap } => String::from_raw_parts(buf, len, cap),
             }

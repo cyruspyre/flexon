@@ -1,41 +1,10 @@
 macro_rules! define_value {
     (
+        $(#[$meta:meta])+
         name: $name:ident $(<$name_lt:lifetime>)?,
-        key_str: $key_str:ty,
-        val_str: $val_str:ty,
-    ) => {
-        define_value! {
-            /// Represents an owned JSON value.
-            name: $name $(<$name_lt>)?,
-            key_str: $key_str,
-            val_str: $val_str,
-            lifetime: '_,
-        }
-    };
-
-    (
-        name: $name:ident $(<$name_lt:lifetime>)?,
-        key_str: $key_str:ty,
-        val_str: $val_str:ty,
-        lifetime: 'a,
-    ) => {
-        define_value! {
-            /// Represents a borrowed JSON value.
-            name: $name $(<$name_lt>)?,
-            key_str: $key_str,
-            val_str: $val_str,
-            lifetime: 'a,
-            volatility: crate::source::NonVolatile
-        }
-    };
-
-    (
-        $(#[$meta:meta])*
-        name: $name:ident $(<$name_lt:lifetime>)?,
-        key_str: $key_str:ty,
-        val_str: $val_str:ty,
+        string: $str:ty,
         lifetime: $lt:lifetime,
-        $(volatility: $volatility:ty)?
+        $(volatility: $volatility:tt,)?
     ) => {
         use core::fmt::{self, Debug, Formatter};
         use crate::{
@@ -54,10 +23,10 @@ macro_rules! define_value {
             Array(Array<Self>),
 
             /// Represents a JSON object.
-            Object(Object<$key_str, Self>),
+            Object(Object<$str, Self>),
 
             /// Represents a JSON string.
-            String($val_str),
+            String($str),
 
             /// Represents a JSON number.
             Number(Number),
@@ -66,14 +35,14 @@ macro_rules! define_value {
             Boolean(bool),
         }
 
-        impl<$($name_lt,)? S: Source $(< Volatility = $volatility >)?> ValueBuilder<$lt, S> for $name $(<$name_lt>)? {
+        impl<$($name_lt,)? S: Source $(< Volatility = crate::source::$volatility >)?> ValueBuilder<$lt, S> for $name $(<$name_lt>)? {
             const LAZY: bool = false;
             const CUSTOM_LITERAL: bool = false;
 
             type Error = Error;
             type Array = Array<Self>;
-            type Object = Object<$key_str, Self>;
-            type String = $val_str;
+            type Object = Object<$str, Self>;
+            type String = $str;
 
             #[inline]
             fn literal(_: &[u8]) -> Result<Self, Self::Error> {
@@ -112,24 +81,45 @@ macro_rules! define_value {
             fn apply_span(&mut self, _: usize, _: usize) {}
         }
 
-        impl $(<$name_lt>)? Into<$name $(<$name_lt>)?> for Array<$name $(<$name_lt>)?> {
+        impl $(<$name_lt>)? From<bool> for $name $(<$name_lt>)? {
             #[inline(always)]
-            fn into(self) -> $name $(<$name_lt>)? {
-                $name::Array(self)
+            fn from(val: bool) -> $name $(<$name_lt>)? {
+                $name::Boolean(val)
             }
         }
 
-        impl $(<$name_lt>)? Into<$name $(<$name_lt>)?> for Object<$key_str, $name $(<$name_lt>)?> {
+        impl $(<$name_lt>)? From<Number> for $name $(<$name_lt>)? {
             #[inline(always)]
-            fn into(self) -> $name $(<$name_lt>)? {
-                $name::Object(self)
+            fn from(val: Number) -> $name $(<$name_lt>)? {
+                $name::Number(val)
+            }
+        }
+        
+        impl $(<$name_lt>)? From<$str> for $name $(<$name_lt>)? {
+            #[inline(always)]
+            fn from(val: $str) -> $name $(<$name_lt>)? {
+                $name::String(val)
             }
         }
 
-        impl $(<$name_lt>)? Into<$name $(<$name_lt>)?> for $val_str {
+        impl $(<$name_lt>)? From<Array<$name $(<$name_lt>)?>> for $name $(<$name_lt>)? {
             #[inline(always)]
-            fn into(self) -> $name $(<$name_lt>)? {
-                $name::String(self)
+            fn from(val: Array<$name $(<$name_lt>)?>) -> $name $(<$name_lt>)? {
+                $name::Array(val)
+            }
+        }
+
+        impl $(<$name_lt>)? From<Object<$str, $name $(<$name_lt>)?>> for $name $(<$name_lt>)? {
+            #[inline(always)]
+            fn from(val: Object<$str, $name $(<$name_lt>)?>) -> $name $(<$name_lt>)? {
+                $name::Object(val)
+            }
+        }
+
+        impl $(<$name_lt>)? From<& $($name_lt)? str> for $name $(<$name_lt>)? {
+            #[inline(always)]
+            fn from(val: & $($name_lt)? str) -> $name $(<$name_lt>)? {
+                $name::String(val.into())
             }
         }
 

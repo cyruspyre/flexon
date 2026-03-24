@@ -3,12 +3,11 @@
 #[cfg(feature = "span")]
 mod span;
 
-mod borrowed;
 pub mod de;
 pub mod format;
-mod number;
 pub mod ser;
 mod unchecked;
+mod value;
 
 #[doc(inline)]
 pub use {
