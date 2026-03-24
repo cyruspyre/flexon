@@ -307,11 +307,13 @@ twitter:
     sonic_rs::to_string                     334.15 µs    1.7601 GiB/s
     serde_json::to_string                   440.55 µs    1.3350 GiB/s
     simd_json::to_string                    471.48 µs    1.2474 GiB/s
+
 citm_catalog:
     serde_json::to_string                   528.57 µs    3.0433 GiB/s
     flexon::to_string                       554.49 µs    2.9010 GiB/s
     simd_json::to_string                    542.07 µs    2.9675 GiB/s
     sonic_rs::to_string                     592.23 µs    2.7162 GiB/s
+
 canada:
     serde_json::to_string                   3.0939 ms   693.88 MiB/s
     flexon::to_string                       3.1101 ms   690.25 MiB/s
