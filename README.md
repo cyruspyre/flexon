@@ -303,20 +303,21 @@ This serializes Rust struct into JSON using serde API.
 
 ```
 twitter:
-    flexon::to_string                       416.12 µs    1.4134 GiB/s
-    sonic_rs::to_string                     334.15 µs    1.7601 GiB/s
-    serde_json::to_string                   440.55 µs    1.3350 GiB/s
-    simd_json::to_string                    471.48 µs    1.2474 GiB/s
+    sonic_rs::to_string                     331.42 µs    1.7746 GiB/s
+    flexon::to_string                       395.78 µs    1.4861 GiB/s
+    simd_json::to_string                    406.28 µs    1.4476 GiB/s
+    serde_json::to_string                   440.38 µs    1.3355 GiB/s
 
 citm_catalog:
-    serde_json::to_string                   528.57 µs    3.0433 GiB/s
-    flexon::to_string                       554.49 µs    2.9010 GiB/s
-    simd_json::to_string                    542.07 µs    2.9675 GiB/s
-    sonic_rs::to_string                     592.23 µs    2.7162 GiB/s
+    simd_json::to_string                    481.08 µs    3.3437 GiB/s
+    serde_json::to_string                   528.86 µs    3.0416 GiB/s
+    flexon::to_string                       537.72 µs    2.9915 GiB/s
+    sonic_rs::to_string                     590.29 µs    2.7251 GiB/s
 
 canada:
-    serde_json::to_string                   3.0939 ms   693.88 MiB/s
-    flexon::to_string                       3.1101 ms   690.25 MiB/s
-    simd_json::to_string                    3.8625 ms   555.80 MiB/s
-    sonic_rs::to_string                     4.0747 ms   526.86 MiB/s
+    serde_json::to_string                   3.0642 ms    700.60 MiB/s
+    flexon::to_string                       3.0878 ms    695.25 MiB/s
+    sonic_rs::to_string                     3.1408 ms    683.51 MiB/s
+    simd_json::to_string                    3.8053 ms    564.15 MiB/s
+
 ```
