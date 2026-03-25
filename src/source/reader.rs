@@ -1,42 +1,52 @@
-use std::{io::Read, slice::from_raw_parts_mut};
+use core::{alloc::Layout, ptr::dangling_mut, slice::from_raw_parts_mut};
+use std::{
+    alloc::{alloc_zeroed, dealloc, realloc},
+    io::Read,
+};
 
 use super::{Source, Volatile};
 
-const BUF_SIZE: usize = 800;
-
 /// A minimal buffered wrapper for types implementing [`Read`].
-pub struct Reader<R, const UTF8: bool> {
+pub struct Reader<const UTF8: bool, R> {
     reader: R,
-    buf: Vec<u8>,
+    buf: *mut u8,
+    len: usize,
+    cap: usize,
+    max_recent: usize,
     offset: usize,
-    cur: usize,
 }
 
-impl<R: Read> Reader<R, false> {
+impl<R> Reader<false, R> {
     /// Creates a new reader with UTF-8 validation.
-    pub fn new(rdr: R) -> Self {
+    #[inline]
+    pub fn new(reader: R) -> Self {
         Self {
-            reader: rdr,
-            buf: Vec::new(),
+            reader,
+            buf: dangling_mut(),
+            len: 0,
+            cap: 0,
+            max_recent: 0,
             offset: 0,
-            cur: 0,
         }
     }
 }
 
-impl<R: Read> Reader<R, true> {
+impl<R> Reader<true, R> {
     /// Creates a new reader without UTF-8 validation.
-    pub unsafe fn new_unchecked(rdr: R) -> Self {
+    #[inline]
+    pub unsafe fn new_unchecked(reader: R) -> Self {
         Self {
-            reader: rdr,
-            buf: Vec::new(),
+            reader,
+            buf: dangling_mut(),
+            len: 0,
+            cap: 0,
+            max_recent: 0,
             offset: 0,
-            cur: 0,
         }
     }
 }
 
-impl<const UTF8: bool, R: Read> Source for Reader<R, UTF8> {
+impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
     const UTF8: bool = UTF8;
     const INSITU: bool = false;
     const NULL_PADDED: bool = false;
@@ -44,43 +54,64 @@ impl<const UTF8: bool, R: Read> Source for Reader<R, UTF8> {
     type Volatility = Volatile;
 
     fn ptr(&mut self, offset: usize) -> *const u8 {
-        self.cur = self.cur.max(offset);
-        unsafe { self.buf.as_ptr().add(offset - self.offset) }
+        self.max_recent = offset.max(self.max_recent);
+        unsafe { self.buf.add(offset - self.offset) }
     }
 
-    #[inline(always)]
     fn ptr_mut(&mut self, _: usize) -> *mut u8 {
         unimplemented!()
     }
 
-    #[inline]
     fn trim(&mut self, until: usize) {
-        if until - self.offset > BUF_SIZE {
-            // ehh inefficient
-            let offset = until - self.offset;
-            let ptr = self.buf.as_mut_ptr();
-            let new_len = self.buf.len() - offset;
+        let remaining = self.len - (until - self.offset);
 
+        if remaining <= 128 {
             unsafe {
-                ptr.copy_from(ptr.add(offset), new_len);
-                self.buf.set_len(new_len);
-                self.offset = until;
+                let old = self.len - remaining;
+
+                self.buf.add(old).copy_to(self.buf, remaining);
+                self.offset += old;
+                self.len = remaining;
+                self.max_recent = until;
             }
         }
     }
 
-    #[inline]
     fn len(&mut self) -> usize {
-        if self.buf.len() + self.offset - self.cur <= BUF_SIZE {
-            self.buf.reserve(BUF_SIZE);
+        if self.len - (self.max_recent - self.offset) < 64 {
+            unsafe {
+                if self.cap - self.len < 1024 {
+                    if self.cap != 0 {
+                        let new = self.cap * 2;
+                        let old = Layout::array::<u8>(self.cap).unwrap_unchecked();
 
-            let start = self.buf.len();
-            let buf = unsafe { from_raw_parts_mut(self.buf.as_mut_ptr().add(start), BUF_SIZE) };
-            let count = self.reader.read(buf).unwrap();
+                        self.buf = realloc(self.buf, old, new);
+                        self.buf.add(self.cap).write_bytes(0, new - self.cap);
+                        self.cap = new;
+                    } else {
+                        self.buf = alloc_zeroed(Layout::array::<u8>(1024).unwrap_unchecked());
+                        self.cap = 1024;
+                    }
+                }
 
-            unsafe { self.buf.set_len(start + count) }
+                self.len += self
+                    .reader
+                    .read(from_raw_parts_mut(
+                        self.buf.add(self.len),
+                        self.cap - self.len,
+                    ))
+                    .unwrap();
+            }
         }
 
-        self.offset + self.buf.len()
+        self.len + self.offset
+    }
+}
+
+impl<const UTF8: bool, R> Drop for Reader<UTF8, R> {
+    fn drop(&mut self) {
+        if self.cap != 0 {
+            unsafe { dealloc(self.buf, Layout::array::<u8>(self.cap).unwrap_unchecked()) }
+        }
     }
 }

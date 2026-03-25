@@ -1099,24 +1099,16 @@ impl<'a> Parser<'a, &'a mut str> {
     }
 }
 
-impl<R: Read> Parser<'_, Reader<R, false>> {
+impl<R: Read> Parser<'_, Reader<false, R>> {
     /// Creates a parser from a type implementing [Read], with UTF-8 validation.
-    ///
-    /// The reader will try to keep a minimal buffer while parsing due to the way
-    /// the parser is. For optimal performance, it is recommended to wrap the input
-    /// in a buffered reader such as [BufReader](std::io::BufReader).
     #[inline]
     pub fn from_reader(r: R) -> Self {
         Self::new(Reader::new(r))
     }
 }
 
-impl<R: Read> Parser<'_, Reader<R, true>> {
+impl<R: Read> Parser<'_, Reader<true, R>> {
     /// Creates a parser from a type implementing [Read], without UTF-8 validation.
-    ///
-    /// The reader will try to keep a minimal buffer while parsing due to the way
-    /// the parser is. For optimal performance, it is recommended to wrap the input
-    /// in a buffered reader such as [BufReader](std::io::BufReader).
     #[inline]
     pub unsafe fn from_reader_unchecked(r: R) -> Self {
         Self::new(Reader::new_unchecked(r))
