@@ -156,19 +156,19 @@ Parsing JSON from a streaming source. `sonic_rs` and `simd_json` are excluded as
 
 ```
 twitter:
-    flexon::from_reader                     2.1314 ms   282.57 MiB/s
+    flexon::from_reader                     1.8245 ms   330.09 MiB/s
     serde_json::from_reader                 3.1992 ms   188.25 MiB/s
 
 citm_catalog:
-    flexon::from_reader                     3.8849 ms   424.00 MiB/s
+    flexon::from_reader                     3.5213 ms   467.78 MiB/s
     serde_json::from_reader                 5.4789 ms   300.64 MiB/s
 
 canada:
     serde_json::from_reader                 7.6590 ms   280.29 MiB/s
-    flexon::from_reader                     7.7365 ms   277.49 MiB/s
+    flexon::from_reader                     7.6629 ms   280.15 MiB/s
 
 github_events:
-    flexon::from_reader                     341.73 µs   181.76 MiB/s
+    flexon::from_reader                     238.48 µs   260.46 MiB/s
     serde_json::from_reader                 362.35 µs   171.42 MiB/s
 ```
 
@@ -319,5 +319,4 @@ canada:
     flexon::to_string                       3.0878 ms    695.25 MiB/s
     sonic_rs::to_string                     3.1408 ms    683.51 MiB/s
     simd_json::to_string                    3.8053 ms    564.15 MiB/s
-
 ```
