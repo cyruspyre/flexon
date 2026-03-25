@@ -15,18 +15,6 @@ pub const NUM_LUT: [bool; 256] = {
     tmp
 };
 
-pub const INT_LUT: [u64; 256] = {
-    let mut tmp = [16; 256];
-    let mut idx = b'0';
-
-    while idx <= b'9' {
-        tmp[idx as usize] = (idx - b'0') as u64;
-        idx += 1;
-    }
-
-    tmp
-};
-
 pub const ESC_LUT: [u8; 256] = {
     let mut tmp = [0; 256];
 

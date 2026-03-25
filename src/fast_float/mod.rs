@@ -12,7 +12,7 @@ use binary::compute_float;
 use float::*;
 use number::*;
 
-use crate::{Parser, config::Config, misc::INT_LUT, source::Source};
+use crate::{Parser, config::Config, source::Source};
 
 impl<S: Source, C: Config> Parser<'_, S, C> {
     #[inline(always)]
@@ -65,8 +65,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
             // count the rest
             while S::NULL_PADDED || self.idx() != self.src.len() {
-                let tmp = INT_LUT[self.cur() as usize];
-                if tmp == 16 {
+                if self.cur().wrapping_sub(b'0') > 9 {
                     break;
                 }
 
@@ -179,13 +178,12 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     #[inline]
     unsafe fn try_parse_19digits(&mut self, idx: &mut usize, mantissa: &mut u64) {
         while (S::NULL_PADDED || *idx != self.src.len()) && *mantissa < MIN_19DIGIT_INT {
-            let tmp = INT_LUT[*self.src.ptr(*idx) as usize];
-
-            if tmp == 16 {
+            let num = self.src.ptr(*idx).read().wrapping_sub(b'0');
+            if num > 9 {
                 break;
             }
 
-            *mantissa = mantissa.wrapping_mul(10).wrapping_add((tmp) as _);
+            *mantissa = mantissa.wrapping_mul(10).wrapping_add(num as _);
             *idx += 1;
         }
     }

@@ -988,18 +988,18 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     return (val, true);
                 }
 
-                let cur = self.cur() as usize;
-                let tmp = INT_LUT[cur];
+                let cur = self.cur();
+                let num = cur.wrapping_sub(b'0');
 
-                if tmp == 16 {
-                    return (val, !NUM_LUT[cur]);
+                if num > 9 {
+                    return (val, !NUM_LUT[cur as usize]);
                 }
 
                 overflow = val > u64::MAX / 10;
                 let mul = val.wrapping_mul(10);
-                overflow = overflow || mul > u64::MAX - tmp;
+                overflow = overflow || mul > u64::MAX - num as u64;
 
-                val = mul.wrapping_add(tmp);
+                val = mul.wrapping_add(num as u64);
                 self.inc(1);
 
                 if overflow {
@@ -1015,8 +1015,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 break;
             }
 
-            let tmp = INT_LUT[self.cur() as usize];
-            if tmp == 16 {
+            let tmp = self.cur().wrapping_sub(b'0') as u64;
+            if tmp > 9 {
                 break;
             }
 

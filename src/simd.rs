@@ -18,7 +18,7 @@ use core::{
 use crate::{
     Parser,
     config::Config,
-    misc::{INT_LUT, NON_LIT_LUT, likely},
+    misc::{NON_LIT_LUT, likely},
     source::Source,
 };
 
@@ -933,12 +933,12 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         while S::NULL_PADDED || self.idx() != self.src.len() {
-            let tmp = INT_LUT[self.cur() as usize];
-            if tmp == 16 {
+            let num = self.cur().wrapping_sub(b'0');
+            if num > 9 {
                 break;
             }
 
-            *mantissa = mantissa.wrapping_mul(10).wrapping_add(tmp as _);
+            *mantissa = mantissa.wrapping_mul(10).wrapping_add(num as _);
             self.inc(1);
         }
     }
