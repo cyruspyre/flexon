@@ -1179,7 +1179,7 @@ const _: fn() = || {
 ///
 /// let json = r#"{"name": "idk", "pages": 256}"#;
 /// let book: Book = flexon::from_str(json)?;
-/// # Ok::<(), flexon::serde::Error>(())
+/// # Ok::<(), flexon::serde::de::Error>(())
 /// ```
 #[inline]
 pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> Result<T> {
@@ -1201,7 +1201,7 @@ pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> Result<T> {
 /// let res: &str = unsafe { flexon::from_mut_str(&mut json)? };
 ///
 /// assert_eq!(res, "foo/bar");
-/// # Ok::<(), flexon::serde::Error>(())
+/// # Ok::<(), flexon::serde::de::Error>(())
 /// ```
 #[inline]
 pub unsafe fn from_mut_str<'a, T: Deserialize<'a>>(s: &'a mut str) -> Result<T> {
@@ -1342,8 +1342,7 @@ where
 ///
 /// # Example
 /// ```
-/// use flexon::{jsonp, serde::error::Kind};
-///
+/// # use flexon::{jsonp, serde::de::Kind};
 /// let src = r#"{"pair": [64,]}"#;
 /// let num: u8 = flexon::get_from(src, jsonp!["pair", 0]).unwrap();
 /// let invalid = flexon::get_from::<_, u8, _>(src, jsonp!["pair", 1]);

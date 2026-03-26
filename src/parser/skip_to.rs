@@ -24,13 +24,13 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     /// use flexon::Parser;
     /// use serde::Deserialize;
     ///
-    /// let src = r#"{"one": 1, two: 2}"#;
+    /// let src = r#"{"one": 1, "two": 2}"#;
     /// let mut parser = Parser::new(src);
     ///
     /// parser.skip_to(["two"])?;
-    /// println!("two is {}", u32::deserialize(&mut tmp)?);
+    /// println!("two is {}", u32::deserialize(&mut parser)?);
     ///
-    /// # Ok::<(), flexon::serde::Error>(())
+    /// # Ok::<(), flexon::serde::de::Error>(())
     /// ```
     pub fn skip_to<E, P>(&mut self, p: P) -> Result<(), E>
     where

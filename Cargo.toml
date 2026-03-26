@@ -28,3 +28,6 @@ serde = { version = "1.0", optional = true }
 zmij = { version = "1.0", optional = true }
 itoa = { version = "1.0", optional = true }
 simdutf8 = "0.1"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }

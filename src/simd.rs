@@ -735,85 +735,13 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 b'}' | b']' => {
                     depth -= 1;
                     if depth == 0 {
-                        return;
+                        return self.dec();
                     }
                 }
                 _ => continue,
             }
         }
     }
-
-    // todo: im unable to make it work when it includes slashes. things ive tried-
-    //       - unpack/repack and use `compute_esc_mask`. doesnt work, doing so has
-    //         different carry behavior.
-    //       - try to make another function based on `compute_esc_mask` but for swar.
-    //         failed. i got cooked in the carry behavior for swar or wtv the hell that is.
-    //
-    // unsafe fn skip_container_swar(&mut self) {
-    //     const ONES: u64 = 0x0101_0101_0101_0101;
-    //     const HIGH: u64 = 0x8080_8080_8080_8080;
-    //     const QUOTE: u64 = b'"' as u64 * ONES;
-    //     const SLASH: u64 = b'\\' as u64 * ONES;
-    //
-    //     let mut tail = [0u8; 8];
-    //     let mut depth = 0_usize;
-    //     let mut in_string = 0;
-    //     let mut last_slash = 0;
-    //
-    //     loop {
-    //         let ptr = if self.idx() + 8 < self.src.len() {
-    //             self.cur_ptr()
-    //         } else {
-    //             let tmp = tail.as_mut_ptr();
-    //             tmp.copy_from_nonoverlapping(self.cur_ptr(), self.src.len() - self.idx());
-    //             tmp
-    //         };
-    //
-    //         let chunk = ptr.cast::<u64>().read_unaligned();
-    //
-    //         let tmp = chunk ^ QUOTE;
-    //         let quote = (tmp.wrapping_sub(ONES) & !tmp & HIGH) & !last_slash;
-    //
-    //         let tmp = chunk ^ SLASH;
-    //         let slash = tmp.wrapping_sub(ONES) & !tmp & HIGH;
-    //
-    //         if slash != 0 {
-    //             todo!()
-    //         }
-    //
-    //         let mut inside = quote ^ in_string;
-    //
-    //         inside ^= inside << 8;
-    //         inside ^= inside << 16;
-    //         inside ^= inside << 32;
-    //
-    //         // let sp = (chunk.wrapping_add(HIGH).wrapping_sub(0x5B5B_5B5B_5B5B_5B5B) ^ HIGH)
-    //         //     & 0xDDDD_DDDD_DDDD_DDDD;
-    //         let tmp = (chunk.wrapping_add(0x2525_2525_2525_2525) ^ HIGH) & 0xDDDD_DDDD_DDDD_DDDD;
-    //         let sp = tmp.wrapping_sub(ONES) & !tmp & HIGH;
-    //
-    //         let mut mask = sp & !inside;
-    //
-    //         in_string = inside >> 56;
-    //         // last_slash = slash;
-    //
-    //         while mask != 0 {
-    //             let idx = mask.trailing_zeros() as usize >> 3;
-    //             match *self.cur_ptr().add(idx) {
-    //                 b'{' | b'[' => depth += 1,
-    //                 _ => {
-    //                     depth -= 1;
-    //                     if depth == 0 {
-    //                         return self.inc(idx);
-    //                     }
-    //                 }
-    //             }
-    //             mask &= mask - 1;
-    //         }
-    //
-    //         self.inc(8)
-    //     }
-    // }
 }
 
 impl<S: Source, C: Config> Parser<'_, S, C> {
