@@ -32,7 +32,7 @@ use crate::{
 /// assert_eq!(span.start(), 25);
 /// assert_eq!(span.end(), 27);
 ///
-/// # Ok::<(), flexon::serde::Error>(())
+/// # Ok::<(), flexon::serde::de::Error>(())
 /// ```
 pub struct Span<T> {
     data: T,

@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(likely_unlikely, cold_path))]
+#![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(unsafe_op_in_unsafe_fn)]

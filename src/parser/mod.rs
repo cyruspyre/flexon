@@ -295,7 +295,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     /// assert_eq!(u8::deserialize(&mut parser)?, 123);
     /// assert_eq!(parser.take_comments()[0].as_str(), " foo bar ");
     ///
-    /// # Ok::<(), flexon::serde::Error>(())
+    /// # Ok::<(), flexon::serde::de::Error>(())
     /// ```
     #[inline]
     #[cfg(feature = "comment")]
@@ -1101,6 +1101,8 @@ impl<'a> Parser<'a, &'a mut str> {
 
 impl<R: Read> Parser<'_, Reader<false, R>> {
     /// Creates a parser from a type implementing [Read], with UTF-8 validation.
+    /// 
+    /// Wrapping the input in [`BufReader`](std::io::BufReader) may or may not be beneficial.
     #[inline]
     pub fn from_reader(r: R) -> Self {
         Self::new(Reader::new(r))
@@ -1109,6 +1111,8 @@ impl<R: Read> Parser<'_, Reader<false, R>> {
 
 impl<R: Read> Parser<'_, Reader<true, R>> {
     /// Creates a parser from a type implementing [Read], without UTF-8 validation.
+    /// 
+    /// Wrapping the input in [`BufReader`](std::io::BufReader) may or may not be beneficial.
     #[inline]
     pub unsafe fn from_reader_unchecked(r: R) -> Self {
         Self::new(Reader::new_unchecked(r))
