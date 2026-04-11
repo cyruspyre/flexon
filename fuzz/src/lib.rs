@@ -12,7 +12,7 @@ pub enum AValue<'a> {
     F64(f64),
     Null(()),
     Bool(bool),
-    String(String),
+    String(&'a str),
     Array(Vec<Self>),
     Object(Vec<(&'a str, Self)>),
 }
