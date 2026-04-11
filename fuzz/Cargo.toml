@@ -8,11 +8,10 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-arbitrary = { version = "1.4.2", features = ["derive"] }
+arbitrary = { version = "1.4", features = ["derive"] }
+flexon = { path = ".." }
 libfuzzer-sys = "0.4"
-
-[dependencies.flexon]
-path = ".."
+serde = { version = "1.0", features = ["derive"] }
 
 [[bin]]
 name = "parse"
@@ -22,8 +21,22 @@ doc = false
 bench = false
 
 [[bin]]
+name = "parse_unchecked"
+path = "fuzz_targets/parse_unchecked.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "parse_at"
 path = "fuzz_targets/parse_at.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_at_unchecked"
+path = "fuzz_targets/parse_at_unchecked.rs"
 test = false
 doc = false
 bench = false
