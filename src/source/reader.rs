@@ -12,7 +12,7 @@ pub struct Reader<const UTF8: bool, R> {
     buf: *mut u8,
     len: usize,
     cap: usize,
-    max_recent: usize,
+    recent: usize,
     offset: usize,
 }
 
@@ -25,7 +25,7 @@ impl<R> Reader<false, R> {
             buf: dangling_mut(),
             len: 0,
             cap: 0,
-            max_recent: 0,
+            recent: 0,
             offset: 0,
         }
     }
@@ -40,7 +40,7 @@ impl<R> Reader<true, R> {
             buf: dangling_mut(),
             len: 0,
             cap: 0,
-            max_recent: 0,
+            recent: 0,
             offset: 0,
         }
     }
@@ -54,7 +54,7 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
     type Volatility = Volatile;
 
     fn ptr(&mut self, offset: usize) -> *const u8 {
-        self.max_recent = offset.max(self.max_recent);
+        self.recent = offset;
         unsafe { self.buf.add(offset - self.offset) }
     }
 
@@ -63,45 +63,54 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
     }
 
     fn trim(&mut self, until: usize) {
+        #[inline(never)]
+        unsafe fn shift<const V: bool, R: Read>(
+            this: &mut Reader<V, R>,
+            remaining: usize,
+            until: usize,
+        ) {
+            let old = this.len - remaining;
+
+            this.buf.add(old).copy_to(this.buf, remaining);
+            this.offset += old;
+            this.len = remaining;
+            this.recent = until;
+        }
+
         let remaining = self.len - (until - self.offset);
-
         if remaining <= 128 {
-            unsafe {
-                let old = self.len - remaining;
-
-                self.buf.add(old).copy_to(self.buf, remaining);
-                self.offset += old;
-                self.len = remaining;
-                self.max_recent = until;
-            }
+            unsafe { shift(self, remaining, until) }
         }
     }
 
     fn len(&mut self) -> usize {
-        if self.len - (self.max_recent - self.offset) < 64 {
-            unsafe {
-                if self.cap - self.len < 1024 {
-                    if self.cap != 0 {
-                        let new = self.cap * 2;
-                        let old = Layout::array::<u8>(self.cap).unwrap_unchecked();
+        #[inline(never)]
+        unsafe fn load<const V: bool, R: Read>(this: &mut Reader<V, R>) {
+            if this.cap - this.len < 1024 {
+                if this.cap != 0 {
+                    let new = this.cap * 2;
+                    let old = Layout::array::<u8>(this.cap).unwrap_unchecked();
 
-                        self.buf = realloc(self.buf, old, new);
-                        self.buf.add(self.cap).write_bytes(0, new - self.cap);
-                        self.cap = new;
-                    } else {
-                        self.buf = alloc_zeroed(Layout::array::<u8>(1024).unwrap_unchecked());
-                        self.cap = 1024;
-                    }
+                    this.buf = realloc(this.buf, old, new);
+                    this.buf.add(this.cap).write_bytes(0, new - this.cap);
+                    this.cap = new;
+                } else {
+                    this.buf = alloc_zeroed(Layout::array::<u8>(1024).unwrap_unchecked());
+                    this.cap = 1024;
                 }
-
-                self.len += self
-                    .reader
-                    .read(from_raw_parts_mut(
-                        self.buf.add(self.len),
-                        self.cap - self.len,
-                    ))
-                    .unwrap();
             }
+
+            this.len += this
+                .reader
+                .read(from_raw_parts_mut(
+                    this.buf.add(this.len),
+                    this.cap - this.len,
+                ))
+                .unwrap();
+        }
+
+        if self.len - (self.recent - self.offset) < 64 {
+            unsafe { load(self) }
         }
 
         self.len + self.offset
