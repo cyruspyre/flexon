@@ -211,6 +211,13 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         P: IntoIterator,
         P::Item: JsonPointer,
     {
+        const {
+            assert!(
+                !S::Volatility::IS_VOLATILE,
+                "volatile source is problematic with unchecked skipping APIs, use checked ones instead"
+            )
+        }
+
         let mut char = self.skip_whitespace();
 
         'main: for pointer in p {

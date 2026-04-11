@@ -27,7 +27,7 @@ use crate::Comment;
 // todo: trim source when skipping values
 
 /// JSON parser structure.
-pub struct Parser<'a, S: Source, C: Config = CTConfig> {
+pub struct Parser<'a, S: Source + 'a, C: Config = CTConfig> {
     pub(crate) src: S,
     pub(crate) cfg: C,
     cur: Cur,
@@ -931,14 +931,12 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let mut tmp = 'tmp: {
             let mut err = 'err: {
                 break 'tmp if S::NULL_PADDED || self.idx() < self.src.len() {
-                    let ptr = self.cur_ptr().sub(3);
-
-                    match ptr.cast::<u32>().read_unaligned() {
+                    match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
                         0x6c6c756e => V::null(),
                         0x65757274 => V::bool(true),
                         0x736c6166
                             if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
-                                && *ptr.add(4) == b'e' =>
+                                && *self.cur_ptr().add(1) == b'e' =>
                         {
                             self.inc(1);
                             V::bool(false)
@@ -1101,7 +1099,7 @@ impl<'a> Parser<'a, &'a mut str> {
 
 impl<R: Read> Parser<'_, Reader<false, R>> {
     /// Creates a parser from a type implementing [Read], with UTF-8 validation.
-    /// 
+    ///
     /// Wrapping the input in [`BufReader`](std::io::BufReader) may or may not be beneficial.
     #[inline]
     pub fn from_reader(r: R) -> Self {
@@ -1111,7 +1109,7 @@ impl<R: Read> Parser<'_, Reader<false, R>> {
 
 impl<R: Read> Parser<'_, Reader<true, R>> {
     /// Creates a parser from a type implementing [Read], without UTF-8 validation.
-    /// 
+    ///
     /// Wrapping the input in [`BufReader`](std::io::BufReader) may or may not be beneficial.
     #[inline]
     pub unsafe fn from_reader_unchecked(r: R) -> Self {

@@ -287,13 +287,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         self.inc(3);
         let err = 'err: {
             if S::NULL_PADDED || self.idx() < self.src.len() {
-                let ptr = self.cur_ptr().sub(3);
-
-                match ptr.cast::<u32>().read_unaligned() {
+                match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
                     0x6c6c756e | 0x65757274 => {}
                     0x736c6166
                         if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
-                            && *ptr.add(4) == b'e' =>
+                            && *self.cur_ptr().add(1) == b'e' =>
                     {
                         self.inc(1)
                     }
