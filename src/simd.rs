@@ -4,23 +4,18 @@
 use core::{
     arch::x86_64::{
         _SIDD_NEGATIVE_POLARITY, _mm_and_si128, _mm_clmulepi64_si128, _mm_cmpeq_epi8, _mm_cmpestri,
-        _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_load_si128, _mm_loadl_epi64,
-        _mm_loadu_si128, _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8, _mm_or_si128,
-        _mm_packus_epi32, _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8, _mm_setr_epi16,
-        _mm_setzero_si128, _mm_shuffle_epi8, _mm_slli_si128, _mm_storeu_si128, _mm_sub_epi8,
-        _mm_subs_epu8, _mm_xor_si128, _mm256_and_si256, _mm256_cmpeq_epi8, _mm256_loadu_si256,
+        _mm_cmpistri, _mm_cvtsi128_si32, _mm_cvtsi128_si64, _mm_loadl_epi64, _mm_loadu_si128,
+        _mm_madd_epi16, _mm_maddubs_epi16, _mm_movemask_epi8, _mm_or_si128, _mm_packus_epi32,
+        _mm_set_epi64x, _mm_set1_epi8, _mm_setr_epi8, _mm_setr_epi16, _mm_setzero_si128,
+        _mm_shuffle_epi8, _mm_slli_si128, _mm_storeu_si128, _mm_sub_epi8, _mm_subs_epu8,
+        _mm_xor_si128, _mm256_and_si256, _mm256_cmpeq_epi8, _mm256_loadu_si256,
         _mm256_movemask_epi8, _mm256_set1_epi8, _mm256_setzero_si256, _mm256_sub_epi8,
         _mm256_zeroupper,
     },
     hint::unreachable_unchecked,
 };
 
-use crate::{
-    Parser,
-    config::Config,
-    misc::{NON_LIT_LUT, likely},
-    source::Source,
-};
+use crate::{Parser, config::Config, misc::likely, source::Source};
 
 const ONES: u64 = 0x0101_0101_0101_0101;
 const HIGH: u64 = 0x8080_8080_8080_8080;

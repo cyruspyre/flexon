@@ -417,15 +417,19 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 cap = new_len;
             }
 
-            return unsafe {
+            unsafe {
                 buf.add(len).copy_from_nonoverlapping(offset, count);
 
                 if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
-                    visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
-                } else {
-                    Err(self.err(Kind::UnexpectedToken))
+                    return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
                 }
-            };
+
+                if cap != 0 {
+                    dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
+                }
+
+                Err(self.err(Kind::UnexpectedToken))
+            }
         } else {
             #[cfg(feature = "span")]
             let start = self.idx();
@@ -541,13 +545,17 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                     .copy_from_nonoverlapping(self.src.ptr(offset), count);
 
                 if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
-                    visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
-                } else {
-                    let mut tmp = self.err(Kind::UnexpectedToken);
-                    #[cfg(feature = "span")]
-                    (tmp.span[0] = start);
-                    Err(tmp)
+                    return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
                 }
+
+                if cap != 0 {
+                    dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
+                }
+
+                let mut tmp = self.err(Kind::UnexpectedToken);
+                #[cfg(feature = "span")]
+                (tmp.span[0] = start);
+                Err(tmp)
             }
         }
     }
