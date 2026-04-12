@@ -95,6 +95,7 @@ impl<T> Span<T> {
     }
 
     #[inline]
+    #[cfg(feature = "serde")]
     pub(crate) fn with(data: T, start: usize, end: usize) -> Self {
         Self { data, start, end }
     }
