@@ -919,7 +919,7 @@ impl<'a, 'de, S: Source, C: Config> de::VariantAccess<'de> for UnitVariantAccess
 }
 
 /// Represents error occurred while parsing.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Error {
     pub(super) kind: Box<Kind>,
     #[cfg(feature = "span")]
@@ -927,7 +927,7 @@ pub struct Error {
 }
 
 /// Represents the type of error.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Kind {
     /// Serde specific error.
     Message(Box<str>),
