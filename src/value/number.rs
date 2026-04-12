@@ -2,10 +2,10 @@ use core::fmt::{Debug, Formatter, Result};
 
 /// Represents a JSON number.
 #[repr(transparent)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Number(pub(crate) Kind);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
     Unsigned(u64),
     Signed(i64),
@@ -75,6 +75,8 @@ impl Number {
         self.as_f64().is_some()
     }
 }
+
+impl Eq for Kind {}
 
 impl Debug for Number {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {

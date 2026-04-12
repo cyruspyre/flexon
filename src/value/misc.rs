@@ -14,7 +14,7 @@ macro_rules! define_value {
         };
 
         $(#[$meta])*
-        #[derive(Clone)]
+        #[derive(Clone, PartialEq, Eq)]
         pub enum $name $(<$name_lt>)? {
             /// Represents a JSON null value.
             Null,
@@ -246,6 +246,15 @@ macro_rules! string_impl {
                 unimplemented!()
             }
         }
+
+        impl<$lt> PartialEq for $type {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.as_str() == other.as_str()
+            }
+        }
+
+        impl<$lt> Eq for $type {}
 
         impl<$lt> core::ops::Deref for $type {
             type Target = str;
