@@ -1,5 +1,5 @@
 /// Represents the type of error that occurred while parsing.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     /// Unexpected EOF while parsing.
     Eof,

@@ -9,7 +9,7 @@ use crate::{
     Error,
     pointer::JsonPointer,
     source::Source,
-    value::{Array, Number, Object, builder::*},
+    value::{Array, Number, Object, borrowed, builder::*, owned},
 };
 
 /// A spanned value with its starting and ending byte offset.
@@ -34,6 +34,7 @@ use crate::{
 ///
 /// # Ok::<(), flexon::serde::de::Error>(())
 /// ```
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span<T> {
     data: T,
     start: usize,
@@ -41,7 +42,8 @@ pub struct Span<T> {
 }
 
 #[doc(hidden)]
-pub enum Value<S> {
+#[derive(Clone, PartialEq, Eq)]
+pub enum GenericValue<S> {
     /// Represents a JSON null value.
     Null,
 
@@ -61,28 +63,11 @@ pub enum Value<S> {
     Boolean(bool),
 }
 
-mod owned {
-    use crate::{
-        span::{Span, Value},
-        value::owned::String,
-    };
+/// Represents a borrowed JSON value.
+pub type Value<'a> = Span<GenericValue<borrowed::String<'a>>>;
 
-    /// Represents an owned JSON value.
-    pub type OwnedValue = Span<Value<String>>;
-}
-
-mod borrowed {
-    use crate::{
-        span::{Span, Value},
-        value::borrowed::String,
-    };
-
-    /// Represents a borrowed JSON value.
-    pub type BorrowedValue<'a> = Span<Value<String<'a>>>;
-}
-
-pub use borrowed::BorrowedValue;
-pub use owned::OwnedValue;
+/// Represents an owned JSON value.
+pub type OwnedValue = Span<GenericValue<owned::String>>;
 
 impl<T> Span<T> {
     #[inline]
@@ -124,7 +109,7 @@ impl<T> Span<T> {
     }
 }
 
-impl<S> Value<S> {
+impl<S> GenericValue<S> {
     /// Returns `()` if it is a null, `None` otherwise.
     #[inline]
     pub fn as_null(&self) -> Option<()> {
@@ -154,7 +139,7 @@ impl<S> Value<S> {
 
     /// Returns a reference to [`Object`] if it is an object, `None` otherwise.
     #[inline]
-    pub fn as_object(&self) -> Option<&Object<Span<S>, Span<Value<S>>>> {
+    pub fn as_object(&self) -> Option<&Object<Span<S>, Span<GenericValue<S>>>> {
         match self {
             Self::Object(v) => Some(v),
             _ => None,
@@ -237,7 +222,7 @@ impl<S> Value<S> {
     }
 }
 
-impl<S: Deref<Target = str>> Value<S> {
+impl<S: Deref<Target = str>> GenericValue<S> {
     /// Returns string slice if it is a string, `None` otherwise.
     #[inline]
     pub fn as_str(&self) -> Option<&str> {
@@ -268,7 +253,7 @@ impl<S: Deref<Target = str>> Value<S> {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&self, p: P) -> Option<&Value<S>>
+    pub fn pointer<P>(&self, p: P) -> Option<&GenericValue<S>>
     where
         P: IntoIterator,
         P::Item: JsonPointer,
@@ -277,8 +262,8 @@ impl<S: Deref<Target = str>> Value<S> {
 
         for pointer in p {
             tmp = match tmp {
-                Value::Object(obj) => obj.get(pointer.as_key()?),
-                Value::Array(arr) => arr.get(pointer.as_index()?),
+                GenericValue::Object(obj) => obj.get(pointer.as_key()?),
+                GenericValue::Array(arr) => arr.get(pointer.as_index()?),
                 _ => None,
             }?
             .data()
@@ -288,7 +273,7 @@ impl<S: Deref<Target = str>> Value<S> {
     }
 
     /// Looks up a value by the given path and returns a mutable reference.
-    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut Value<S>>
+    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut GenericValue<S>>
     where
         P: IntoIterator,
         P::Item: JsonPointer,
@@ -297,8 +282,8 @@ impl<S: Deref<Target = str>> Value<S> {
 
         for pointer in p {
             tmp = match tmp {
-                Value::Object(obj) => obj.get_mut(pointer.as_key()?),
-                Value::Array(arr) => arr.get_mut(pointer.as_index()?),
+                GenericValue::Object(obj) => obj.get_mut(pointer.as_key()?),
+                GenericValue::Array(arr) => arr.get_mut(pointer.as_index()?),
                 _ => None,
             }?
             .data_mut()
@@ -308,7 +293,7 @@ impl<S: Deref<Target = str>> Value<S> {
     }
 }
 
-impl<S: Deref<Target = str>> Span<Value<S>> {
+impl<S: Deref<Target = str>> Span<GenericValue<S>> {
     /// Looks up a value by the given path and returns a reference.
     ///
     /// If the path is empty, then the root value is returned.
@@ -324,7 +309,7 @@ impl<S: Deref<Target = str>> Span<Value<S>> {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&self, p: P) -> Option<&Span<Value<S>>>
+    pub fn pointer<P>(&self, p: P) -> Option<&Span<GenericValue<S>>>
     where
         P: IntoIterator,
         P::Item: JsonPointer,
@@ -333,8 +318,8 @@ impl<S: Deref<Target = str>> Span<Value<S>> {
 
         for pointer in p {
             tmp = match tmp.data() {
-                Value::Object(obj) => obj.get(pointer.as_key()?),
-                Value::Array(arr) => arr.get(pointer.as_index()?),
+                GenericValue::Object(obj) => obj.get(pointer.as_key()?),
+                GenericValue::Array(arr) => arr.get(pointer.as_index()?),
                 _ => None,
             }?
         }
@@ -343,7 +328,7 @@ impl<S: Deref<Target = str>> Span<Value<S>> {
     }
 
     /// Looks up a value by the given path and returns a mutable reference.
-    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut Span<Value<S>>>
+    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut Span<GenericValue<S>>>
     where
         P: IntoIterator,
         P::Item: JsonPointer,
@@ -352,8 +337,8 @@ impl<S: Deref<Target = str>> Span<Value<S>> {
 
         for pointer in p {
             tmp = match tmp.data_mut() {
-                Value::Object(obj) => obj.get_mut(pointer.as_key()?),
-                Value::Array(arr) => arr.get_mut(pointer.as_index()?),
+                GenericValue::Object(obj) => obj.get_mut(pointer.as_key()?),
+                GenericValue::Array(arr) => arr.get_mut(pointer.as_index()?),
                 _ => None,
             }?
         }
@@ -362,8 +347,8 @@ impl<S: Deref<Target = str>> Span<Value<S>> {
     }
 }
 
-impl<S> Index<usize> for Value<S> {
-    type Output = Value<S>;
+impl<S> Index<usize> for GenericValue<S> {
+    type Output = GenericValue<S>;
 
     #[inline]
     fn index(&self, idx: usize) -> &Self::Output {
@@ -377,8 +362,8 @@ impl<S> Index<usize> for Value<S> {
     }
 }
 
-impl<S: Deref<Target = str>> Index<&str> for Value<S> {
-    type Output = Value<S>;
+impl<S: Deref<Target = str>> Index<&str> for GenericValue<S> {
+    type Output = GenericValue<S>;
 
     #[inline]
     fn index(&self, key: &str) -> &Self::Output {
@@ -401,18 +386,6 @@ impl<T: Deref<Target = str>> Deref for Span<T> {
     }
 }
 
-impl<T: Clone> Clone for Span<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            ..*self
-        }
-    }
-}
-
-impl<T: Copy> Copy for Span<T> {}
-
 impl<T: Debug> Debug for Span<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}..{}] ", self.start, self.end)?;
@@ -420,7 +393,7 @@ impl<T: Debug> Debug for Span<T> {
     }
 }
 
-impl<'a, S, V> ValueBuilder<'a, S> for Span<Value<V>>
+impl<'a, S, V> ValueBuilder<'a, S> for Span<GenericValue<V>>
 where
     S: Source,
     V: StringBuilder<'a, S, Span<Error>>,
@@ -429,8 +402,8 @@ where
     const CUSTOM_LITERAL: bool = false;
 
     type Error = Span<Error>;
-    type Array = Array<Span<Value<V>>>;
-    type Object = Object<Span<V>, Span<Value<V>>>;
+    type Array = Array<Span<GenericValue<V>>>;
+    type Object = Object<Span<V>, Span<GenericValue<V>>>;
     type String = Span<V>;
 
     #[inline]
@@ -440,7 +413,7 @@ where
 
     #[inline]
     fn integer(val: u64, neg: bool) -> Self {
-        Self::new(Value::Number(match neg {
+        Self::new(GenericValue::Number(match neg {
             true => Number::from_i64(val as _),
             _ => Number::from_u64(val),
         }))
@@ -448,17 +421,21 @@ where
 
     #[inline]
     fn float(val: f64) -> Self {
-        unsafe { Self::new(Value::Number(Number::from_f64(val).unwrap_unchecked())) }
+        unsafe {
+            Self::new(GenericValue::Number(
+                Number::from_f64(val).unwrap_unchecked(),
+            ))
+        }
     }
 
     #[inline]
     fn bool(val: bool) -> Self {
-        Self::new(Value::Boolean(val))
+        Self::new(GenericValue::Boolean(val))
     }
 
     #[inline]
     fn null() -> Self {
-        Self::new(Value::Null)
+        Self::new(GenericValue::Null)
     }
 
     #[inline]
@@ -586,32 +563,32 @@ impl<E: ErrorBuilder> ErrorBuilder for Span<E> {
     }
 }
 
-impl<'a, S> From<Array<Span<Value<S>>>> for Span<Value<S>> {
+impl<'a, S> From<Array<Span<GenericValue<S>>>> for Span<GenericValue<S>> {
     #[inline]
-    fn from(value: Array<Span<Value<S>>>) -> Self {
-        Self::new(Value::Array(value))
+    fn from(value: Array<Span<GenericValue<S>>>) -> Self {
+        Self::new(GenericValue::Array(value))
     }
 }
 
-impl<'a, S> From<Object<Span<S>, Span<Value<S>>>> for Span<Value<S>> {
+impl<'a, S> From<Object<Span<S>, Span<GenericValue<S>>>> for Span<GenericValue<S>> {
     #[inline]
-    fn from(value: Object<Span<S>, Span<Value<S>>>) -> Self {
-        Self::new(Value::Object(value))
+    fn from(value: Object<Span<S>, Span<GenericValue<S>>>) -> Self {
+        Self::new(GenericValue::Object(value))
     }
 }
 
-impl<'a, S> From<Span<S>> for Span<Value<S>> {
+impl<'a, S> From<Span<S>> for Span<GenericValue<S>> {
     #[inline]
     fn from(value: Span<S>) -> Self {
         Span {
-            data: Value::String(value.data),
+            data: GenericValue::String(value.data),
             start: value.start,
             end: value.end,
         }
     }
 }
 
-impl<'a, S: Debug> Debug for Value<S> {
+impl<'a, S: Debug> Debug for GenericValue<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Null => f.write_str("null"),

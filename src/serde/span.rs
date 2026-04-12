@@ -4,7 +4,7 @@ use core::{
 };
 
 use serde::{
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{self, DeserializeSeed, IntoDeserializer, SeqAccess},
 };
 
@@ -58,6 +58,7 @@ impl<'a, 'de, S: Source, C: Config> SeqAccess<'de> for Builder<'a, 'de, S, C> {
 }
 
 impl<'a, T: Deserialize<'a>> Deserialize<'a> for Span<T> {
+    #[inline]
     fn deserialize<D: Deserializer<'a>>(de: D) -> Result<Self, D::Error> {
         struct Visitor<T>(PhantomData<T>);
 
@@ -82,5 +83,12 @@ impl<'a, T: Deserialize<'a>> Deserialize<'a> for Span<T> {
         }
 
         de.deserialize_newtype_struct(TOKEN, Visitor(PhantomData))
+    }
+}
+
+impl<T: Serialize> Serialize for Span<T> {
+    #[inline]
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.data().serialize(serializer)
     }
 }

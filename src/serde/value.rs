@@ -14,6 +14,9 @@ use crate::value::{
     owned,
 };
 
+#[cfg(feature = "span")]
+use {crate::span::GenericValue, core::ops::Deref};
+
 impl<'de> Deserialize<'de> for Value<'de> {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -190,6 +193,98 @@ impl<'de> Deserialize<'de> for OwnedValue {
     }
 }
 
+#[cfg(feature = "span")]
+impl<'de, S: Deserialize<'de>> Deserialize<'de> for GenericValue<S> {
+    #[inline]
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        use core::marker::PhantomData;
+        use serde::de::IntoDeserializer;
+
+        struct Visitor<S>(PhantomData<S>);
+
+        impl<'de, S: Deserialize<'de>> de::Visitor<'de> for Visitor<S> {
+            type Value = GenericValue<S>;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                f.write_str("a valid JSON value")
+            }
+
+            #[inline]
+            fn visit_bool<E: Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(GenericValue::Boolean(v))
+            }
+
+            #[inline]
+            fn visit_none<E: Error>(self) -> Result<Self::Value, E> {
+                Ok(GenericValue::Null)
+            }
+
+            #[inline]
+            fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
+                Ok(GenericValue::Null)
+            }
+
+            #[inline]
+            fn visit_some<D: Deserializer<'de>>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error> {
+                Deserialize::deserialize(deserializer)
+            }
+
+            #[inline]
+            fn visit_u64<E: Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(GenericValue::Number(Number::from_u64(v)))
+            }
+
+            #[inline]
+            fn visit_i64<E: Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(GenericValue::Number(Number::from_i64(v)))
+            }
+
+            #[inline]
+            fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(Number::from_f64(v).map_or(GenericValue::Null, GenericValue::Number))
+            }
+
+            #[inline]
+            fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+                S::deserialize(v.into_deserializer()).map(GenericValue::String)
+            }
+
+            #[inline]
+            fn visit_string<E: Error>(self, v: std::string::String) -> Result<Self::Value, E> {
+                S::deserialize(v.into_deserializer()).map(GenericValue::String)
+            }
+
+            #[inline]
+            fn visit_borrowed_str<E: Error>(self, v: &'de str) -> Result<Self::Value, E> {
+                S::deserialize(de::value::BorrowedStrDeserializer::new(v)).map(GenericValue::String)
+            }
+
+            #[inline]
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut arr = Array::new();
+                while let Some(val) = seq.next_element()? {
+                    arr.on_value(val);
+                }
+                Ok(GenericValue::Array(arr))
+            }
+
+            #[inline]
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut obj = Object::new();
+                while let Some((k, v)) = map.next_entry()? {
+                    obj.on_value(k, v);
+                }
+                Ok(GenericValue::Object(obj))
+            }
+        }
+
+        de.deserialize_any(Visitor(PhantomData))
+    }
+}
+
 impl<'de> Deserialize<'de> for String<'de> {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -336,6 +431,35 @@ impl Serialize for OwnedValue {
                     ser.serialize_entry(k, v)?
                 }
                 ser.end()
+            }
+        }
+    }
+}
+
+#[cfg(feature = "span")]
+impl<S> Serialize for GenericValue<S>
+where
+    S: Serialize + Deref<Target = str>,
+{
+    fn serialize<Ser: Serializer>(&self, ser: Ser) -> Result<Ser::Ok, Ser::Error> {
+        match self {
+            GenericValue::Null => ser.serialize_unit(),
+            GenericValue::Boolean(v) => ser.serialize_bool(*v),
+            GenericValue::Number(v) => v.serialize(ser),
+            GenericValue::String(v) => ser.serialize_str(v),
+            GenericValue::Array(v) => {
+                let mut seq = ser.serialize_seq(Some(v.len()))?;
+                for item in v.iter() {
+                    seq.serialize_element(item.data())?;
+                }
+                seq.end()
+            }
+            GenericValue::Object(v) => {
+                let mut map = ser.serialize_map(Some(v.len()))?;
+                for (k, v) in v.as_slice() {
+                    map.serialize_entry(k.data().deref(), v.data())?;
+                }
+                map.end()
             }
         }
     }
