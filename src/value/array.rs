@@ -74,6 +74,15 @@ impl<V> ArrayBuilder<V> for Array<V> {
     fn on_complete(&mut self) {}
 }
 
+impl<V: PartialEq> PartialEq for Array<V> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.deref() == other.deref()
+    }
+}
+
+impl<V: Eq> Eq for Array<V> {}
+
 impl<V: Clone> Clone for Array<V> {
     fn clone(&self) -> Self {
         if self.len != 0 {

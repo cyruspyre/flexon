@@ -7,7 +7,10 @@ use core::{
     ops::{Index, IndexMut},
 };
 
-use crate::{pointer::JsonPointer, value::misc::define_value};
+use crate::{
+    pointer::JsonPointer,
+    value::{misc::define_value, owned},
+};
 
 pub use string::String;
 
@@ -240,6 +243,33 @@ impl<'a> Value<'a> {
         }
 
         Some(tmp)
+    }
+}
+
+impl PartialEq<Value<'_>> for owned::Value {
+    fn eq(&self, other: &Value<'_>) -> bool {
+        match (self, other) {
+            (Self::Null, Value::Null) => true,
+            (Self::Number(a), Value::Number(b)) => a == b,
+            (Self::String(a), Value::String(b)) => a == b,
+            (Self::Boolean(a), Value::Boolean(b)) => a == b,
+            (Self::Array(a), Value::Array(b)) => **a == **b,
+            (Self::Object(a), Value::Object(b)) => {
+                a.len() == b.len()
+                    && a.as_slice()
+                        .iter()
+                        .zip(b.as_slice())
+                        .all(|((a, b), (x, y))| a == x && b == y)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<owned::Value> for Value<'_> {
+    #[inline]
+    fn eq(&self, other: &owned::Value) -> bool {
+        other == self
     }
 }
 

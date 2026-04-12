@@ -1,4 +1,5 @@
-use std::alloc::{Layout, alloc, dealloc};
+use core::alloc::Layout;
+use std::alloc::{alloc, dealloc};
 
 use super::{NonVolatile, Source};
 

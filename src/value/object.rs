@@ -8,7 +8,7 @@ use crate::value::{Array, builder::*};
 /// Represents a JSON object.
 ///
 /// As of right now it stores elements as an array of key-value pairs. The original JSON source order is preserved.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Object<K, V>(Array<(K, V)>);
 
 impl<K, V> Object<K, V> {

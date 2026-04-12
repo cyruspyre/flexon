@@ -8,7 +8,7 @@ use crate::{
     Error,
     misc::likely,
     source::{NonVolatile, Source},
-    value::{builder::*, misc::string_impl},
+    value::{builder::*, misc::string_impl, owned},
 };
 
 /// Represents a borrowed JSON string.
@@ -146,6 +146,20 @@ where
 }
 
 string_impl!(String<'a>, 'a);
+
+impl PartialEq<String<'_>> for owned::String {
+    #[inline]
+    fn eq(&self, other: &String<'_>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<owned::String> for String<'_> {
+    #[inline]
+    fn eq(&self, other: &owned::String) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
 
 impl<'a> From<&'a str> for String<'a> {
     /// Creates a borrowed string from the string slice.
