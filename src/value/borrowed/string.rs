@@ -1,6 +1,6 @@
 use core::{
-    alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts,
-    str::from_utf8_unchecked,
+    alloc::Layout, hint::unreachable_unchecked, mem::ManuallyDrop, ptr::dangling_mut,
+    slice::from_raw_parts, str::from_utf8_unchecked,
 };
 use std::alloc::{alloc, dealloc, realloc};
 
@@ -172,8 +172,13 @@ impl<'a> From<&'a str> for String<'a> {
 impl From<std::string::String> for String<'_> {
     #[inline]
     fn from(value: std::string::String) -> Self {
-        let (buf, len, cap) = value.into_raw_parts();
-        Self(Inner::Heap { buf, len, cap })
+        let mut value = ManuallyDrop::new(value);
+
+        Self(Inner::Heap {
+            buf: value.as_mut_ptr(),
+            len: value.len(),
+            cap: value.capacity(),
+        })
     }
 }
 
