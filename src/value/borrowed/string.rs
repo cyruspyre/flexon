@@ -173,11 +173,12 @@ impl From<std::string::String> for String<'_> {
     #[inline]
     fn from(value: std::string::String) -> Self {
         let mut value = ManuallyDrop::new(value);
-        let buf = value.as_mut_ptr();
-        let len = value.len();
-        let cap = value.capacity();
 
-        Self(Inner::Heap { buf, len, cap })
+        Self(Inner::Heap {
+            buf: value.as_mut_ptr(),
+            len: value.len(),
+            cap: value.capacity(),
+        })
     }
 }
 

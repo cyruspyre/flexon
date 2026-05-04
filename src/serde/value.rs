@@ -308,11 +308,12 @@ impl<'de> Deserialize<'de> for String<'de> {
             #[inline]
             fn visit_string<E: Error>(self, v: std::string::String) -> Result<String<'de>, E> {
                 let mut v = ManuallyDrop::new(v);
-                let buf = v.as_mut_ptr();
-                let len = v.len();
-                let cap = v.capacity();
 
-                Ok(String::from_raw_parts(buf, len, cap))
+                Ok(String::from_raw_parts(
+                    v.as_mut_ptr(),
+                    v.len(),
+                    v.capacity(),
+                ))
             }
 
             #[inline]
