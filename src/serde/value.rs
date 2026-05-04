@@ -6,6 +6,7 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
 };
 
+use crate::misc::string_into_raw_parts;
 use crate::value::{
     Array, Number, Object, OwnedValue,
     borrowed::{String, Value},
@@ -304,7 +305,7 @@ impl<'de> Deserialize<'de> for String<'de> {
 
             #[inline]
             fn visit_string<E: Error>(self, v: std::string::String) -> Result<String<'de>, E> {
-                let (buf, len, cap) = v.into_raw_parts();
+                let (buf, len, cap) = string_into_raw_parts(v);
                 Ok(String::from_raw_parts(buf, len, cap))
             }
 

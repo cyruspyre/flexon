@@ -6,7 +6,7 @@ use std::alloc::{alloc, dealloc, realloc};
 
 use crate::{
     Error,
-    misc::likely,
+    misc::{likely, string_into_raw_parts},
     source::{NonVolatile, Source},
     value::{builder::*, misc::string_impl, owned},
 };
@@ -172,7 +172,7 @@ impl<'a> From<&'a str> for String<'a> {
 impl From<std::string::String> for String<'_> {
     #[inline]
     fn from(value: std::string::String) -> Self {
-        let (buf, len, cap) = value.into_raw_parts();
+        let (buf, len, cap) = string_into_raw_parts(value);
         Self(Inner::Heap { buf, len, cap })
     }
 }
