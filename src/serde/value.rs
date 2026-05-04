@@ -1,4 +1,7 @@
-use core::fmt::{self, Formatter};
+use core::{
+    fmt::{self, Formatter},
+    mem::ManuallyDrop,
+};
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -304,8 +307,13 @@ impl<'de> Deserialize<'de> for String<'de> {
 
             #[inline]
             fn visit_string<E: Error>(self, v: std::string::String) -> Result<String<'de>, E> {
-                let (buf, len, cap) = v.into_raw_parts();
-                Ok(String::from_raw_parts(buf, len, cap))
+                let mut v = ManuallyDrop::new(v);
+
+                Ok(String::from_raw_parts(
+                    v.as_mut_ptr(),
+                    v.len(),
+                    v.capacity(),
+                ))
             }
 
             #[inline]
