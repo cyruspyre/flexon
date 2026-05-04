@@ -1,9 +1,12 @@
-use core::{alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts};
+use core::{
+    alloc::Layout, hint::unreachable_unchecked, mem::ManuallyDrop, ptr::dangling_mut,
+    slice::from_raw_parts,
+};
 use std::alloc::{alloc, dealloc, realloc};
 
 use crate::{
     Error,
-    misc::{likely, string_into_raw_parts},
+    misc::likely,
     source::Source,
     value::{builder::*, misc::string_impl},
 };
@@ -178,7 +181,11 @@ impl From<&str> for String {
 impl From<std::string::String> for String {
     #[inline]
     fn from(value: std::string::String) -> Self {
-        let (buf, len, cap) = string_into_raw_parts(value);
+        let mut value = ManuallyDrop::new(value);
+        let buf = value.as_mut_ptr();
+        let len = value.len();
+        let cap = value.capacity();
+
         Self(Inner::Heap { buf, len, cap })
     }
 }

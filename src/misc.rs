@@ -59,13 +59,6 @@ pub const NON_LIT_LUT: [bool; 256] = {
 
 pub trait Sealed {}
 
-#[inline]
-pub(crate) fn string_into_raw_parts(value: std::string::String) -> (*mut u8, usize, usize) {
-    let mut value = core::mem::ManuallyDrop::new(value);
-
-    (value.as_mut_ptr(), value.len(), value.capacity())
-}
-
 #[inline(always)]
 pub fn likely(b: bool) -> bool {
     #[cfg(feature = "nightly")]

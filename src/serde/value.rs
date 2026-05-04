@@ -1,4 +1,7 @@
-use core::fmt::{self, Formatter};
+use core::{
+    fmt::{self, Formatter},
+    mem::ManuallyDrop,
+};
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -6,7 +9,6 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
 };
 
-use crate::misc::string_into_raw_parts;
 use crate::value::{
     Array, Number, Object, OwnedValue,
     borrowed::{String, Value},
@@ -305,7 +307,11 @@ impl<'de> Deserialize<'de> for String<'de> {
 
             #[inline]
             fn visit_string<E: Error>(self, v: std::string::String) -> Result<String<'de>, E> {
-                let (buf, len, cap) = string_into_raw_parts(v);
+                let mut v = ManuallyDrop::new(v);
+                let buf = v.as_mut_ptr();
+                let len = v.len();
+                let cap = v.capacity();
+
                 Ok(String::from_raw_parts(buf, len, cap))
             }
 
