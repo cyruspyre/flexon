@@ -84,6 +84,7 @@ impl JsonPointer for usize {
 /// assert_eq!(val.as_str(), Some("Walter"));
 /// ```
 #[macro_export]
+#[cfg(feature = "alloc")]
 macro_rules! jsonp {
     () => (
         [] as [$crate::pointer::Pointer; 0]

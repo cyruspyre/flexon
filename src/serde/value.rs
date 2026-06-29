@@ -1,25 +1,29 @@
-use core::{
-    fmt::{self, Formatter},
-    mem::ManuallyDrop,
-};
-
-use serde::{
+use crate::value::{Number, number::Kind};
+use core::fmt::{self, Formatter};
+use serde_core::{
     Deserialize, Deserializer, Serialize, Serializer,
-    de::{self, Error, MapAccess, SeqAccess},
-    ser::{SerializeMap, SerializeSeq},
+    de::{self, Error},
 };
 
-use crate::value::{
-    Array, Number, Object, OwnedValue,
-    borrowed::{String, Value},
-    builder::{ArrayBuilder, ObjectBuilder},
-    number::Kind,
-    owned,
+#[cfg(feature = "alloc")]
+use {
+    crate::value::{
+        Array, Object, OwnedValue,
+        borrowed::{String, Value},
+        builder::{ArrayBuilder, ObjectBuilder},
+        owned,
+    },
+    core::mem::ManuallyDrop,
+    serde_core::{
+        de::{MapAccess, SeqAccess},
+        ser::{SerializeMap, SerializeSeq},
+    },
 };
 
-#[cfg(feature = "span")]
+#[cfg(all(feature = "alloc", feature = "span"))]
 use {crate::span::GenericValue, core::ops::Deref};
 
+#[cfg(feature = "alloc")]
 impl<'de> Deserialize<'de> for Value<'de> {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -76,7 +80,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
             }
 
             #[inline]
-            fn visit_string<E: Error>(self, v: std::string::String) -> Result<Value<'de>, E> {
+            fn visit_string<E: Error>(self, v: alloc::string::String) -> Result<Value<'de>, E> {
                 Ok(Value::String(v.into()))
             }
 
@@ -108,6 +112,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'de> Deserialize<'de> for OwnedValue {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -164,7 +169,7 @@ impl<'de> Deserialize<'de> for OwnedValue {
             }
 
             #[inline]
-            fn visit_string<E: Error>(self, v: std::string::String) -> Result<OwnedValue, E> {
+            fn visit_string<E: Error>(self, v: alloc::string::String) -> Result<OwnedValue, E> {
                 Ok(OwnedValue::String(v.into()))
             }
 
@@ -196,12 +201,12 @@ impl<'de> Deserialize<'de> for OwnedValue {
     }
 }
 
-#[cfg(feature = "span")]
+#[cfg(all(feature = "alloc", feature = "span"))]
 impl<'de, S: Deserialize<'de>> Deserialize<'de> for GenericValue<S> {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         use core::marker::PhantomData;
-        use serde::de::IntoDeserializer;
+        use serde_core::de::IntoDeserializer;
 
         struct Visitor<S>(PhantomData<S>);
 
@@ -256,7 +261,7 @@ impl<'de, S: Deserialize<'de>> Deserialize<'de> for GenericValue<S> {
             }
 
             #[inline]
-            fn visit_string<E: Error>(self, v: std::string::String) -> Result<Self::Value, E> {
+            fn visit_string<E: Error>(self, v: alloc::string::String) -> Result<Self::Value, E> {
                 S::deserialize(v.into_deserializer()).map(GenericValue::String)
             }
 
@@ -288,6 +293,7 @@ impl<'de, S: Deserialize<'de>> Deserialize<'de> for GenericValue<S> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'de> Deserialize<'de> for String<'de> {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -306,7 +312,7 @@ impl<'de> Deserialize<'de> for String<'de> {
             }
 
             #[inline]
-            fn visit_string<E: Error>(self, v: std::string::String) -> Result<String<'de>, E> {
+            fn visit_string<E: Error>(self, v: alloc::string::String) -> Result<String<'de>, E> {
                 let mut v = ManuallyDrop::new(v);
 
                 Ok(String::from_raw_parts(
@@ -326,6 +332,7 @@ impl<'de> Deserialize<'de> for String<'de> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'de> Deserialize<'de> for owned::String {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
@@ -344,7 +351,7 @@ impl<'de> Deserialize<'de> for owned::String {
             }
 
             #[inline]
-            fn visit_string<E: Error>(self, v: std::string::String) -> Result<Self::Value, E> {
+            fn visit_string<E: Error>(self, v: alloc::string::String) -> Result<Self::Value, E> {
                 Ok(v.into())
             }
 
@@ -392,6 +399,7 @@ impl<'de> Deserialize<'de> for Number {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Serialize for Value<'_> {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -417,6 +425,7 @@ impl Serialize for Value<'_> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Serialize for OwnedValue {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         type Value = OwnedValue;
@@ -444,7 +453,7 @@ impl Serialize for OwnedValue {
     }
 }
 
-#[cfg(feature = "span")]
+#[cfg(all(feature = "alloc", feature = "span"))]
 impl<S> Serialize for GenericValue<S>
 where
     S: Serialize + Deref<Target = str>,
@@ -473,6 +482,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Serialize for String<'_> {
     #[inline]
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
@@ -480,6 +490,7 @@ impl Serialize for String<'_> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Serialize for owned::String {
     #[inline]
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {

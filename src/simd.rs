@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use crate::{Parser, config::Config, misc::likely, source::Source};
+
 #[cfg(target_arch = "x86_64")]
 use core::{
     arch::x86_64::{
@@ -14,8 +16,6 @@ use core::{
     },
     hint::unreachable_unchecked,
 };
-
-use crate::{Parser, config::Config, misc::likely, source::Source};
 
 const ONES: u64 = 0x0101_0101_0101_0101;
 const HIGH: u64 = 0x8080_8080_8080_8080;

@@ -1,15 +1,11 @@
-use core::{
-    alloc::Layout, hint::unreachable_unchecked, mem::ManuallyDrop, ptr::dangling_mut,
-    slice::from_raw_parts,
-};
-use std::alloc::{alloc, dealloc, realloc};
-
 use crate::{
     Error,
-    misc::likely,
+    misc::{capacity_overflow, likely},
     source::Source,
     value::{builder::*, misc::string_impl},
 };
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
+use core::{alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts};
 
 /// Represents an owned JSON string.
 ///
@@ -61,7 +57,7 @@ where
     }
 
     #[inline]
-    fn on_escape(&mut self, s: &[u8]) {
+    unsafe fn on_escape(&mut self, s: &[u8]) {
         unsafe {
             match &mut self.0 {
                 Inner::Heap { buf, len, .. } => {
@@ -78,14 +74,15 @@ where
         let Inner::Heap { buf, len, cap } = &mut self.0 else {
             unsafe { unreachable_unchecked() }
         };
-        let new_len = *len + s.len() + 4;
+        let mut new_len = *len + s.len() + 4;
 
         if *cap < new_len {
-            let tmp = new_len * 5 / 4;
-
+            new_len += new_len / 4;
             *buf = unsafe {
-                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-                if *cap != 0 {
+                let Ok(layout) = Layout::array::<u8>(new_len) else {
+                    capacity_overflow()
+                };
+                let buf = if *cap != 0 {
                     realloc(
                         *buf,
                         Layout::array::<u8>(*cap).unwrap_unchecked(),
@@ -93,9 +90,14 @@ where
                     )
                 } else {
                     alloc(layout)
+                };
+
+                if buf.is_null() {
+                    handle_alloc_error(layout)
                 }
+                buf
             };
-            *cap = tmp;
+            *cap = new_len;
         }
 
         unsafe { buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len()) }
@@ -111,7 +113,6 @@ where
         if likely(*len == 0 && s.len() <= 30) {
             return unsafe {
                 let mut buf = [0; 30];
-
                 buf.as_mut_ptr()
                     .copy_from_nonoverlapping(s.as_ptr(), s.len());
 
@@ -127,7 +128,7 @@ where
         if *cap < new_len {
             *buf = unsafe {
                 let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
-                if *cap != 0 {
+                let buf = if *cap != 0 {
                     realloc(
                         *buf,
                         Layout::array::<u8>(*cap).unwrap_unchecked(),
@@ -135,7 +136,12 @@ where
                     )
                 } else {
                     alloc(layout)
+                };
+
+                if buf.is_null() {
+                    handle_alloc_error(layout)
                 }
+                buf
             };
             *cap = new_len;
         }
@@ -158,43 +164,43 @@ string_impl!(String);
 impl From<&str> for String {
     #[inline]
     fn from(value: &str) -> Self {
-        unsafe {
-            let ptr = value.as_ptr();
-            let len = value.len();
+        let src = value.as_ptr();
+        let len = value.len();
 
-            String(if len <= 30 {
+        String(unsafe {
+            if len <= 30 {
                 let mut buf = [0; 30];
-                buf.as_mut_ptr().copy_from_nonoverlapping(ptr, len);
-
+                buf.as_mut_ptr().copy_from_nonoverlapping(src, len);
                 Inner::Stack { buf, len: len as _ }
             } else {
-                // non zero allocation
-                let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
-                buf.copy_from_nonoverlapping(ptr, len);
+                let layout = Layout::array::<u8>(len).unwrap_unchecked();
+                let buf = alloc(layout);
 
+                if buf.is_null() {
+                    handle_alloc_error(layout)
+                }
+
+                buf.copy_from_nonoverlapping(src, len);
                 Inner::Heap { buf, len, cap: len }
-            })
-        }
-    }
-}
-
-impl From<std::string::String> for String {
-    #[inline]
-    fn from(value: std::string::String) -> Self {
-        let mut value = ManuallyDrop::new(value);
-
-        Self(Inner::Heap {
-            buf: value.as_mut_ptr(),
-            len: value.len(),
-            cap: value.capacity(),
+            }
         })
     }
 }
 
-impl From<String> for std::string::String {
+#[cfg(feature = "alloc")]
+impl From<alloc::string::String> for String {
+    #[inline]
+    fn from(value: alloc::string::String) -> Self {
+        let (buf, len, cap) = value.into_raw_parts();
+        Self(Inner::Heap { buf, len, cap })
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<String> for alloc::string::String {
     #[inline]
     fn from(value: String) -> Self {
-        use std::string::String;
+        use alloc::string::String;
 
         unsafe {
             match value.0 {
@@ -214,7 +220,13 @@ impl Clone for String {
             Inner::Stack { buf, len } => Self(Inner::Stack { buf, len }),
             Inner::Heap { buf: src, len, .. } => Self(if len != 0 {
                 unsafe {
-                    let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+                    let layout = Layout::array::<u8>(len).unwrap_unchecked();
+                    let buf = alloc(layout);
+
+                    if buf.is_null() {
+                        handle_alloc_error(layout)
+                    }
+
                     buf.copy_from_nonoverlapping(src, len);
                     Inner::Heap { buf, len, cap: len }
                 }

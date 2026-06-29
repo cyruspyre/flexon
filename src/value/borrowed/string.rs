@@ -1,14 +1,13 @@
-use core::{
-    alloc::Layout, hint::unreachable_unchecked, mem::ManuallyDrop, ptr::dangling_mut,
-    slice::from_raw_parts, str::from_utf8_unchecked,
-};
-use std::alloc::{alloc, dealloc, realloc};
-
 use crate::{
     Error,
-    misc::likely,
+    misc::{capacity_overflow, likely},
     source::{NonVolatile, Source},
     value::{builder::*, misc::string_impl, owned},
+};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
+use core::{
+    alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts,
+    str::from_utf8_unchecked,
 };
 
 /// Represents a borrowed JSON string.
@@ -63,7 +62,7 @@ where
     }
 
     #[inline]
-    fn on_escape(&mut self, s: &[u8]) {
+    unsafe fn on_escape(&mut self, s: &[u8]) {
         unsafe {
             match &mut self.0 {
                 Inner::Heap { buf, len, .. } => {
@@ -80,14 +79,15 @@ where
         let Inner::Heap { buf, len, cap } = &mut self.0 else {
             unsafe { unreachable_unchecked() }
         };
-        let new_len = *len + s.len() + 4;
+        let mut new_len = *len + s.len() + 4;
 
         if *cap < new_len {
-            let tmp = new_len * 5 / 4;
-
+            new_len += new_len / 4;
             *buf = unsafe {
-                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-                if *cap != 0 {
+                let Ok(layout) = Layout::array::<u8>(new_len) else {
+                    capacity_overflow()
+                };
+                let buf = if *cap != 0 {
                     realloc(
                         *buf,
                         Layout::array::<u8>(*cap).unwrap_unchecked(),
@@ -95,9 +95,14 @@ where
                     )
                 } else {
                     alloc(layout)
+                };
+
+                if buf.is_null() {
+                    handle_alloc_error(layout)
                 }
+                buf
             };
-            *cap = tmp;
+            *cap = new_len;
         }
 
         unsafe { buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len()) }
@@ -119,15 +124,20 @@ where
         if *cap < new_len {
             *buf = unsafe {
                 let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
-                if *cap != 0 {
+                let buf = if *cap != 0 {
                     realloc(
                         *buf,
                         Layout::array::<u8>(*cap).unwrap_unchecked(),
-                        Layout::array::<u8>(new_len).unwrap_unchecked().size(),
+                        layout.size(),
                     )
                 } else {
                     alloc(layout)
+                };
+
+                if buf.is_null() {
+                    handle_alloc_error(layout)
                 }
+                buf
             };
             *cap = new_len;
         }
@@ -169,26 +179,23 @@ impl<'a> From<&'a str> for String<'a> {
     }
 }
 
-impl From<std::string::String> for String<'_> {
+#[cfg(feature = "alloc")]
+impl From<alloc::string::String> for String<'_> {
     #[inline]
-    fn from(value: std::string::String) -> Self {
-        let mut value = ManuallyDrop::new(value);
-
-        Self(Inner::Heap {
-            buf: value.as_mut_ptr(),
-            len: value.len(),
-            cap: value.capacity(),
-        })
+    fn from(value: alloc::string::String) -> Self {
+        let (buf, len, cap) = value.into_raw_parts();
+        Self(Inner::Heap { buf, len, cap })
     }
 }
 
-impl From<String<'_>> for std::string::String {
+#[cfg(feature = "alloc")]
+impl From<String<'_>> for alloc::string::String {
     /// Converts the value into [`String`](std::string::String).
     ///
     /// This does not allocate or copy memory if the string is already owned.
     #[inline]
     fn from(value: String<'_>) -> Self {
-        use std::string::String;
+        use alloc::string::String;
 
         unsafe {
             match value.0 {
@@ -206,7 +213,13 @@ impl Clone for String<'_> {
             Inner::Ref(items) => Self(Inner::Ref(items)),
             Inner::Heap { buf: src, len, .. } => Self(if len != 0 {
                 unsafe {
-                    let buf = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+                    let layout = Layout::array::<u8>(len).unwrap_unchecked();
+                    let buf = alloc(layout);
+
+                    if buf.is_null() {
+                        handle_alloc_error(layout)
+                    }
+
                     buf.copy_from_nonoverlapping(src, len);
                     Inner::Heap { buf, len, cap: len }
                 }

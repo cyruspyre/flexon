@@ -1,43 +1,58 @@
+#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::std_instead_of_core)]
 
-#[cfg(feature = "serde")]
-pub mod serde;
-#[cfg(feature = "span")]
-pub mod span;
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
-#[cfg(feature = "comment")]
-mod comment;
 pub mod config;
 mod error;
 mod fast_float;
 mod misc;
 mod parser;
-pub mod pointer;
 mod simd;
 pub mod source;
 pub mod value;
 
-use crate::{pointer::JsonPointer, source::Source, value::builder::ValueBuilder};
+#[cfg(feature = "comment")]
+mod comment;
+#[cfg(feature = "alloc")]
+pub mod pointer;
+#[cfg(feature = "serde")]
+pub mod serde;
+#[cfg(feature = "span")]
+pub mod span;
+
+use crate::{source::Source, value::builder::ValueBuilder};
 
 #[doc(inline)]
+pub use {error::Error, parser::Parser};
+
+#[doc(inline)]
+#[cfg(feature = "alloc")]
 pub use {
-    error::Error,
-    parser::Parser,
+    pointer::JsonPointer,
     value::{LazyValue, OwnedValue, Value},
 };
 
 #[doc(inline)]
 #[cfg(feature = "serde")]
+pub use serde::de::{
+    from_mut_slice, from_mut_slice_unchecked, from_mut_str, from_slice, from_slice_unchecked,
+    from_str,
+};
+
+#[doc(inline)]
+#[cfg(all(feature = "serde", feature = "alloc"))]
+pub use serde::de::{from_mut_null_padded, from_null_padded, get_from, get_from_unchecked};
+
+#[doc(inline)]
+#[cfg(all(feature = "serde", feature = "std"))]
 pub use serde::{
-    de::{
-        from_mut_null_padded, from_mut_slice, from_mut_slice_unchecked, from_mut_str,
-        from_null_padded, from_reader, from_reader_unchecked, from_slice, from_slice_unchecked,
-        from_str, get_from, get_from_unchecked,
-    },
+    de::{from_reader, from_reader_unchecked},
     ser::{to_string, to_string_pretty, to_vec, to_vec_pretty, to_writer, to_writer_pretty},
 };
 
@@ -76,6 +91,7 @@ pub fn parse<'a, S: Source + 'a, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::E
 /// # Ok::<(), flexon::Error>(())
 /// ```
 #[inline]
+#[cfg(feature = "alloc")]
 pub fn parse_at<'a, S, V, P>(s: S, p: P) -> Result<V, V::Error>
 where
     S: Source + 'a,

@@ -1,19 +1,17 @@
 //! Serialize JSON using serde.
 
+use super::format::*;
 use core::fmt::{self, Display, Formatter};
-use std::io::Write;
-
-use serde::ser::{
+use serde_core::ser::{
     self, Impossible, Serialize, SerializeMap, SerializeSeq, SerializeStruct,
     SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
 };
+use std::io::Write;
 
-use super::format::*;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// JSON serializing structure.
 pub struct Serializer<W: Write, F: Format>(W, F);
-
-pub type Result<T> = core::result::Result<T, Error>;
 
 impl<W: Write, F: Format> Serializer<W, F> {
     #[inline(always)]

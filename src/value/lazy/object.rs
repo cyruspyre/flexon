@@ -1,14 +1,14 @@
-use core::{
-    hint::unreachable_unchecked,
-    ops::{Index, IndexMut},
-};
-
 use crate::{
     Parser,
     value::{
         borrowed::String,
         lazy::{Raw, Value},
     },
+};
+use alloc::vec::Vec;
+use core::{
+    hint::unreachable_unchecked,
+    ops::{Index, IndexMut},
 };
 
 /// Represents a lazy JSON object.

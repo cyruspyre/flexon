@@ -14,20 +14,22 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["serde", "prealloc", "runtime-detection"]
+default = ["serde", "runtime-detection"]
+alloc = ["serde_core?/alloc"]
+nightly = []
 simd = []
 span = []
-nightly = []
-comment = []
-prealloc = []
-serde = ["dep:serde", "dep:zmij", "dep:itoa"]
-runtime-detection = ["simd"]
+comment = ["alloc"]
+prealloc = ["alloc"]
+std = ["alloc", "serde_core?/std", "simdutf8/std"]
+runtime-detection = ["simd", "std"]
+serde = ["dep:serde_core", "dep:zmij", "dep:itoa"]
 
 [dependencies]
-serde = { version = "1.0", optional = true }
+serde_core = { version = "1.0", optional = true, default-features = false }
 zmij = { version = "1.0", optional = true }
 itoa = { version = "1.0", optional = true }
-simdutf8 = "0.1"
+simdutf8 = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }

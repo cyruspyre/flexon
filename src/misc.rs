@@ -82,3 +82,9 @@ pub fn cold_path() {
     #[cfg(feature = "nightly")]
     core::hint::cold_path()
 }
+
+#[inline(never)]
+#[cfg(feature = "alloc")]
+pub fn capacity_overflow() -> ! {
+    panic!("capacity overflow")
+}

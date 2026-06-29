@@ -1,11 +1,16 @@
 //! JSON source types and traits for parsing.
 
+#[cfg(feature = "alloc")]
 mod null_padded;
+#[cfg(feature = "std")]
 mod reader;
 
 use crate::misc::Sealed;
 
-pub use {null_padded::NullPadded, reader::Reader};
+#[cfg(feature = "alloc")]
+pub use null_padded::NullPadded;
+#[cfg(feature = "std")]
+pub use reader::Reader;
 
 /// Trait representing a source of JSON data for parsing.
 ///

@@ -1,17 +1,21 @@
+use alloc::{
+    alloc::{alloc, dealloc, handle_alloc_error},
+    string::String,
+};
 use core::{
     alloc::Layout,
     fmt::{Debug, Display, Formatter, Result},
     marker::PhantomData,
+    ptr::NonNull,
     slice::from_raw_parts,
     str::from_utf8_unchecked,
 };
-use std::alloc::{alloc, dealloc};
 
 /// Represents JSON comments in JSONC.
 pub struct Comment<'a> {
     owned: bool,
     multi: bool,
-    buf: *mut u8,
+    buf: NonNull<u8>,
     len: usize,
     #[cfg(feature = "span")]
     span: [usize; 2],
@@ -30,13 +34,19 @@ impl<'a> Comment<'a> {
         Self {
             buf: match owned {
                 true => unsafe {
-                    // no need to check for `len != 0` as owned is true
+                    // len is within `1..=isize::MAX` as owned is true
                     // only when the source is volatile and the comment is non empty.
-                    let tmp = alloc(Layout::array::<u8>(len).unwrap_unchecked());
-                    tmp.copy_from_nonoverlapping(src, len);
-                    tmp
+                    let layout = Layout::array::<u8>(len).unwrap_unchecked();
+                    let buf = match NonNull::new(alloc(layout)) {
+                        Some(v) => v,
+                        _ => handle_alloc_error(layout),
+                    };
+
+                    buf.as_ptr().copy_from_nonoverlapping(src, len);
+                    buf
                 },
-                _ => src,
+                // `src` is always non null
+                _ => unsafe { NonNull::new_unchecked(src) },
             },
             len,
             owned,
@@ -62,7 +72,7 @@ impl<'a> Comment<'a> {
     /// Returns the comment as a string slice.
     #[inline]
     pub fn as_str(&'a self) -> &'a str {
-        unsafe { from_utf8_unchecked(from_raw_parts(self.buf, self.len)) }
+        unsafe { from_utf8_unchecked(from_raw_parts(self.buf.as_ptr(), self.len)) }
     }
 
     /// Returns the starting byte offset of the comment.
@@ -84,17 +94,22 @@ impl<'a> Comment<'a> {
     /// Consumes the comment and converts it into [`String`].
     pub fn into_string(self) -> String {
         unsafe {
-            // there might be cases like `/**/` where the comment is empty.
-            // so we check length here to avoid allocating 0 bytes.
+            // there might be cases like `/**/` where the comment is empty and
+            // considered borrowed. so need to check length to avoid allocating 0 bytes.
             let buf = if self.owned || self.len == 0 {
                 self.buf
             } else {
-                let tmp = alloc(Layout::array::<u8>(self.len).unwrap_unchecked());
-                tmp.copy_from_nonoverlapping(self.buf, self.len);
-                tmp
+                let layout = Layout::array::<u8>(self.len).unwrap_unchecked();
+                let buf = match NonNull::new(alloc(layout)) {
+                    Some(v) => v,
+                    None => handle_alloc_error(layout),
+                };
+
+                buf.copy_from_nonoverlapping(self.buf, self.len);
+                buf
             };
 
-            String::from_raw_parts(buf, self.len, self.len)
+            String::from_raw_parts(buf.as_ptr(), self.len, self.len)
         }
     }
 }
@@ -116,7 +131,12 @@ impl Drop for Comment<'_> {
         if self.owned {
             // no need to check for `len != 0` as owned is true
             // only when the source is volatile and the comment is non empty.
-            unsafe { dealloc(self.buf, Layout::array::<u8>(self.len).unwrap_unchecked()) }
+            unsafe {
+                dealloc(
+                    self.buf.as_ptr(),
+                    Layout::array::<u8>(self.len).unwrap_unchecked(),
+                )
+            }
         }
     }
 }

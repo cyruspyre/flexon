@@ -1,36 +1,39 @@
 //! Deserialize JSON using serde.
 
-use core::{
-    alloc::Layout,
-    fmt::{self, Display, Formatter},
-    hint::select_unpredictable,
-    ptr::dangling_mut,
-    slice::from_raw_parts,
-    str::from_utf8_unchecked,
-};
-use std::{
-    alloc::{alloc, dealloc, realloc},
-    io::Read,
-};
-
-use serde::{
-    Deserialize, Deserializer,
-    de::{
-        self, DeserializeOwned, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected,
-        Visitor,
-    },
-    forward_to_deserialize_any,
-};
-use simdutf8::basic::from_utf8;
-
 use crate::{
     Parser,
     config::Config,
     misc::{ESC_LUT, NUM_LUT, unlikely},
-    pointer::JsonPointer,
-    serde::unchecked::Unchecked,
-    source::{NullPadded, Source, Volatility},
+    source::{Source, Volatility},
 };
+use core::{
+    fmt::{self, Display, Formatter},
+    slice::from_raw_parts,
+    str::from_utf8_unchecked,
+};
+use serde_core::{
+    Deserialize, Deserializer,
+    de::{self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected, Visitor},
+    forward_to_deserialize_any,
+};
+use simdutf8::basic::from_utf8;
+
+#[cfg(feature = "alloc")]
+use {
+    crate::{
+        misc::capacity_overflow, pointer::JsonPointer, serde::unchecked::Unchecked,
+        source::NullPadded,
+    },
+    alloc::{
+        alloc::{alloc, dealloc, handle_alloc_error, realloc},
+        boxed::Box,
+        string::{String, ToString},
+    },
+    core::{alloc::Layout, ptr::dangling_mut},
+};
+
+#[cfg(feature = "std")]
+use std::io::Read;
 
 #[cfg(feature = "span")]
 use super::span::*;
@@ -162,6 +165,9 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     #[cold]
     fn err(&mut self, kind: Kind) -> Error {
         Error {
+            #[cfg(not(feature = "alloc"))]
+            kind,
+            #[cfg(feature = "alloc")]
             kind: Box::new(kind),
             #[cfg(feature = "span")]
             span: [self.idx(); 2],
@@ -210,324 +216,195 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             self.src.trim(tmp);
         }
 
-        // hmm...
-        if !S::Volatility::IS_VOLATILE & S::INSITU {
-            let start = unsafe { self.cur_ptr_mut().add(1) };
-            let mut offset = start;
-            let mut len = 0;
-            let err = loop {
-                if self.simd_str() {
-                    continue;
-                }
+        match S::INSITU {
+            true => unsafe {
+                let start = self.cur_ptr_mut().add(1);
+                let mut offset = start;
+                let mut len = 0;
+                let err = loop {
+                    if self.simd_str() {
+                        continue;
+                    }
 
-                self.inc(1);
-                if !S::NULL_PADDED && self.idx() >= self.src.len() {
-                    break Kind::UnclosedString;
-                }
+                    self.inc(1);
+                    if !S::NULL_PADDED && self.idx() >= self.src.len() {
+                        break Kind::UnclosedString;
+                    }
 
-                break match self.cur() {
-                    b'"' => unsafe {
-                        let count = self.cur_ptr().offset_from_unsigned(offset);
-                        if len != 0 {
+                    break match self.cur() {
+                        b'"' => {
+                            let count = self.cur_ptr().offset_from_unsigned(offset);
+                            if len != 0 {
+                                start.add(len).copy_from(offset, count);
+                            }
+
+                            len += count;
+                            let tmp = from_raw_parts(start, len);
+
+                            return if S::UTF8 || from_utf8(tmp).is_ok() {
+                                visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
+                            } else {
+                                Err(self.err(Kind::UnexpectedToken))
+                            };
+                        }
+                        b'\\' => {
+                            let count = self.cur_ptr().offset_from_unsigned(offset);
+
                             start.add(len).copy_from(offset, count);
+                            self.inc(1);
+
+                            len += count;
+                            offset = self.cur_ptr_mut().add(1);
+
+                            if !S::NULL_PADDED && self.idx() == self.src.len() {
+                                break Kind::UnclosedString;
+                            }
+
+                            let ptr = start.add(len);
+                            let tmp = self.cur();
+                            let esc = ESC_LUT[tmp as usize];
+
+                            if esc != 0 {
+                                ptr.write(esc);
+                                len += 1;
+                                continue;
+                            }
+
+                            if tmp == b'u'
+                                && let Some(v) = self.unicode_escape(&mut [0; 4])
+                            {
+                                ptr.copy_from_nonoverlapping(v.as_ptr(), v.len());
+                                offset = self.cur_ptr_mut().add(1);
+                                len += v.len();
+                                continue;
+                            }
+
+                            if S::NULL_PADDED && tmp == 0 {
+                                Kind::UnclosedString
+                            } else {
+                                Kind::InvalidEscapeSequnce
+                            }
+                        }
+                        0x20.. => continue,
+                        0 => Kind::UnclosedString,
+                        _ => Kind::ControlCharacter,
+                    };
+                };
+                let err = self.close_string(err);
+                let mut err = self.err(err);
+
+                #[cfg(feature = "span")]
+                {
+                    // exclude quote
+                    err.span[0] = start.offset_from_unsigned(self.src.ptr(0)) - 1
+                }
+
+                Err(err)
+            },
+            #[cfg(feature = "alloc")]
+            _ if S::Volatility::IS_VOLATILE => unsafe {
+                #[cfg(feature = "span")]
+                let start = self.idx();
+                let mut offset = self.idx() + 1;
+                let mut buf = dangling_mut();
+                let mut cap = 0;
+                let mut len = 0;
+
+                'main: {
+                    let err = loop {
+                        if self.simd_str() {
+                            continue;
                         }
 
-                        len += count;
-                        let tmp = from_raw_parts(start, len);
-
-                        return if S::UTF8 || from_utf8(tmp).is_ok() {
-                            visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
-                        } else {
-                            Err(self.err(Kind::UnexpectedToken))
-                        };
-                    },
-                    b'\\' => unsafe {
-                        let count = self.cur_ptr().offset_from_unsigned(offset);
-
-                        start.add(len).copy_from(offset, count);
                         self.inc(1);
-
-                        len += count;
-                        offset = self.cur_ptr_mut().add(1);
-
-                        if !S::NULL_PADDED && self.idx() == self.src.len() {
+                        if !S::NULL_PADDED && self.idx() >= self.src.len() {
                             break Kind::UnclosedString;
                         }
 
-                        let ptr = start.add(len);
-                        let tmp = self.cur();
-                        let esc = ESC_LUT[tmp as usize];
+                        break match self.cur() {
+                            b'"' => break 'main,
+                            b'\\' => {
+                                let count = self.idx() - offset;
+                                // `len + count` < isize::MAX, 4 << usize::MAX - isize::MAX
+                                let new_len = len + count + 4;
 
-                        if esc != 0 {
-                            ptr.write(esc);
-                            len += 1;
-                            continue;
-                        }
+                                if cap < new_len {
+                                    let tmp = new_len + new_len / 4; // 5n / 4 = n + n / 4, `new_len` >= 4
+                                    let Ok(layout) = Layout::array::<u8>(tmp) else {
+                                        capacity_overflow()
+                                    };
 
-                        if tmp == b'u'
-                            && let Some(v) = self.unicode_escape(&mut [0; 4])
-                        {
-                            ptr.copy_from_nonoverlapping(v.as_ptr(), v.len());
-                            offset = self.cur_ptr_mut().add(1);
-                            len += v.len();
-                            continue;
-                        }
+                                    buf = if cap != 0 {
+                                        realloc(
+                                            buf,
+                                            Layout::array::<u8>(cap).unwrap_unchecked(),
+                                            layout.size(),
+                                        )
+                                    } else {
+                                        alloc(layout)
+                                    };
+                                    if buf.is_null() {
+                                        handle_alloc_error(layout)
+                                    }
+                                    cap = tmp;
+                                }
 
-                        select_unpredictable(
-                            S::NULL_PADDED && tmp == 0,
-                            Kind::UnclosedString,
-                            Kind::InvalidEscapeSequnce,
-                        )
-                    },
-                    0x20.. => continue,
-                    0 => Kind::UnclosedString,
-                    _ => Kind::ControlCharacter,
-                };
-            };
-            let err = self.close_string(err);
-            let mut err = self.err(err);
+                                buf.add(len)
+                                    .copy_from_nonoverlapping(self.src.ptr(offset), count);
+                                self.inc(1);
 
-            #[cfg(feature = "span")]
-            unsafe {
-                // exclude quote
-                err.span[0] = start.offset_from_unsigned(self.src.ptr(0)) - 1
-            }
-
-            Err(err)
-        } else if !S::Volatility::IS_VOLATILE & !S::INSITU {
-            #[cfg(feature = "span")]
-            let start = self.idx();
-            let mut offset = unsafe { self.cur_ptr().add(1) };
-            let mut buf = dangling_mut();
-            let mut cap = 0;
-            let mut len = 0;
-
-            'main: {
-                let err = loop {
-                    if self.simd_str() {
-                        continue;
-                    }
-
-                    self.inc(1);
-                    if !S::NULL_PADDED && self.idx() >= self.src.len() {
-                        break Kind::UnclosedString;
-                    }
-
-                    break match self.cur() {
-                        b'"' => break 'main,
-                        b'\\' => unsafe {
-                            let count = self.cur_ptr().offset_from_unsigned(offset);
-                            let new_len = len + count + 4;
-
-                            if cap < new_len {
-                                let tmp = new_len * 5 / 4;
-                                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-
-                                buf = if cap != 0 {
-                                    realloc(
-                                        buf,
-                                        Layout::array::<u8>(cap).unwrap_unchecked(),
-                                        layout.size(),
-                                    )
-                                } else {
-                                    alloc(layout)
-                                };
-                                cap = tmp;
-                            }
-
-                            buf.add(len).copy_from_nonoverlapping(offset, count);
-                            self.inc(1);
-
-                            len += count;
-                            offset = self.cur_ptr().add(1);
-
-                            if !S::NULL_PADDED && self.idx() == self.src.len() {
-                                break Kind::UnclosedString;
-                            }
-
-                            let tmp = self.cur();
-                            let buf = buf.add(len);
-                            let esc = ESC_LUT[tmp as usize];
-
-                            if esc != 0 {
-                                buf.write(esc);
-                                len += 1;
-                                continue;
-                            }
-
-                            if tmp == b'u'
-                                && let Some(v) = self.unicode_escape(&mut [0; 4])
-                            {
-                                buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
-                                offset = self.cur_ptr().add(1);
-                                len += v.len();
-                                continue;
-                            }
-
-                            select_unpredictable(
-                                S::NULL_PADDED && tmp == 0,
-                                Kind::UnclosedString,
-                                Kind::InvalidEscapeSequnce,
-                            )
-                        },
-                        0x20.. => continue,
-                        0 if S::NULL_PADDED => Kind::Eof,
-                        _ => Kind::ControlCharacter,
-                    };
-                };
-                let err = self.close_string(err);
-                let mut err = self.err(err);
-
-                #[cfg(feature = "span")]
-                (err.span[0] = start);
-
-                if cap != 0 {
-                    unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked()) }
-                }
-
-                return Err(err);
-            }
-
-            if len == 0 {
-                return unsafe {
-                    let tmp = from_raw_parts(offset, self.cur_ptr().offset_from_unsigned(offset));
-
-                    if S::UTF8 || from_utf8(tmp).is_ok() {
-                        visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
-                    } else {
-                        Err(self.err(Kind::UnexpectedToken))
-                    }
-                };
-            }
-
-            let count = unsafe { self.cur_ptr().offset_from_unsigned(offset) };
-            let new_len = len + count;
-
-            if cap < new_len {
-                buf = unsafe {
-                    // if the string had esc chars then it would've allocated already if
-                    // not it is returned above as borrowed string. so we can just use
-                    // realloc without checking.
-                    realloc(
-                        buf,
-                        Layout::array::<u8>(cap).unwrap_unchecked(),
-                        Layout::array::<u8>(new_len).unwrap_unchecked().size(),
-                    )
-                };
-                cap = new_len;
-            }
-
-            unsafe {
-                buf.add(len).copy_from_nonoverlapping(offset, count);
-
-                if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
-                    return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
-                }
-
-                if cap != 0 {
-                    dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
-                }
-
-                Err(self.err(Kind::UnexpectedToken))
-            }
-        } else {
-            #[cfg(feature = "span")]
-            let start = self.idx();
-            let mut offset = self.idx() + 1;
-            let mut buf = dangling_mut();
-            let mut cap = 0;
-            let mut len = 0;
-
-            'main: {
-                let err = loop {
-                    if self.simd_str() {
-                        continue;
-                    }
-
-                    self.inc(1);
-                    if !S::NULL_PADDED && self.idx() >= self.src.len() {
-                        break Kind::UnclosedString;
-                    }
-
-                    break match self.cur() {
-                        b'"' => break 'main,
-                        b'\\' => unsafe {
-                            let count = self.idx() - offset;
-                            let new_len = len + count + 4;
-
-                            if cap < new_len {
-                                let tmp = new_len * 5 / 4;
-                                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-
-                                buf = if cap != 0 {
-                                    realloc(
-                                        buf,
-                                        Layout::array::<u8>(cap).unwrap_unchecked(),
-                                        layout.size(),
-                                    )
-                                } else {
-                                    alloc(layout)
-                                };
-                                cap = tmp;
-                            }
-
-                            buf.add(len)
-                                .copy_from_nonoverlapping(self.src.ptr(offset), count);
-                            self.inc(1);
-
-                            len += count;
-                            offset = self.idx() + 1;
-
-                            if !S::NULL_PADDED && self.idx() == self.src.len() {
-                                break Kind::UnclosedString;
-                            }
-
-                            let tmp = self.cur();
-                            let buf = buf.add(len);
-                            let esc = ESC_LUT[tmp as usize];
-
-                            if esc != 0 {
-                                buf.write(esc);
-                                len += 1;
-                                continue;
-                            }
-
-                            if tmp == b'u'
-                                && let Some(v) = self.unicode_escape(&mut [0; 4])
-                            {
-                                buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
+                                len += count;
                                 offset = self.idx() + 1;
-                                len += v.len();
-                                continue;
+
+                                if !S::NULL_PADDED && self.idx() == self.src.len() {
+                                    break Kind::UnclosedString;
+                                }
+
+                                let tmp = self.cur();
+                                let buf = buf.add(len);
+                                let esc = ESC_LUT[tmp as usize];
+
+                                if esc != 0 {
+                                    buf.write(esc);
+                                    len += 1;
+                                    continue;
+                                }
+
+                                if tmp == b'u'
+                                    && let Some(v) = self.unicode_escape(&mut [0; 4])
+                                {
+                                    buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
+                                    offset = self.idx() + 1;
+                                    len += v.len();
+                                    continue;
+                                }
+
+                                Kind::InvalidEscapeSequnce
                             }
-
-                            Kind::InvalidEscapeSequnce
-                        },
-                        0x20.. => continue,
-                        _ => Kind::ControlCharacter,
+                            0x20.. => continue,
+                            _ => Kind::ControlCharacter,
+                        };
                     };
-                };
-                let err = self.close_string(err);
-                let mut err = self.err(err);
+                    let err = self.close_string(err);
+                    let mut err = self.err(err);
 
-                #[cfg(feature = "span")]
-                (err.span[0] = start);
+                    #[cfg(feature = "span")]
+                    (err.span[0] = start);
 
-                if cap != 0 {
-                    unsafe { dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked()) }
+                    if cap != 0 {
+                        dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
+                    }
+
+                    return Err(err);
                 }
 
-                return Err(err);
-            }
+                let count = self.idx() - offset;
+                let new_len = len + count;
 
-            let count = self.idx() - offset;
-            let new_len = len + count;
-
-            if cap < new_len {
-                buf = unsafe {
+                if cap < new_len {
                     let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
 
-                    if cap == 0 {
+                    buf = if cap == 0 {
                         alloc(layout)
                     } else {
                         realloc(
@@ -535,12 +412,13 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             Layout::array::<u8>(cap).unwrap_unchecked(),
                             layout.size(),
                         )
+                    };
+                    if buf.is_null() {
+                        handle_alloc_error(layout)
                     }
-                };
-                cap = new_len;
-            }
+                    cap = new_len;
+                }
 
-            unsafe {
                 buf.add(len)
                     .copy_from_nonoverlapping(self.src.ptr(offset), count);
 
@@ -556,7 +434,161 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 #[cfg(feature = "span")]
                 (tmp.span[0] = start);
                 Err(tmp)
-            }
+            },
+            #[cfg(feature = "alloc")]
+            _ => unsafe {
+                #[cfg(feature = "span")]
+                let start = self.idx();
+                let mut offset = self.cur_ptr().add(1);
+                let mut buf = dangling_mut();
+                let mut cap = 0;
+                let mut len = 0;
+
+                'main: {
+                    let err = loop {
+                        if self.simd_str() {
+                            continue;
+                        }
+
+                        self.inc(1);
+                        if !S::NULL_PADDED && self.idx() >= self.src.len() {
+                            break Kind::UnclosedString;
+                        }
+
+                        break match self.cur() {
+                            b'"' => break 'main,
+                            b'\\' => {
+                                let count = self.cur_ptr().offset_from_unsigned(offset);
+                                // `len + count` < isize::MAX, 4 << usize::MAX - isize::MAX
+                                let new_len = len + count + 4;
+
+                                if cap < new_len {
+                                    let tmp = new_len + new_len / 4; // 5n / 4 = n + n / 4, `new_len` >= 4
+                                    let Ok(layout) = Layout::array::<u8>(tmp) else {
+                                        capacity_overflow()
+                                    };
+
+                                    buf = if cap != 0 {
+                                        realloc(
+                                            buf,
+                                            Layout::array::<u8>(cap).unwrap_unchecked(),
+                                            layout.size(),
+                                        )
+                                    } else {
+                                        alloc(layout)
+                                    };
+                                    if buf.is_null() {
+                                        handle_alloc_error(layout)
+                                    }
+                                    cap = tmp;
+                                }
+
+                                buf.add(len).copy_from_nonoverlapping(offset, count);
+                                self.inc(1);
+
+                                len += count;
+                                offset = self.cur_ptr().add(1);
+
+                                if !S::NULL_PADDED && self.idx() == self.src.len() {
+                                    break Kind::UnclosedString;
+                                }
+
+                                let tmp = self.cur();
+                                let buf = buf.add(len);
+                                let esc = ESC_LUT[tmp as usize];
+
+                                if esc != 0 {
+                                    buf.write(esc);
+                                    len += 1;
+                                    continue;
+                                }
+
+                                if tmp == b'u'
+                                    && let Some(v) = self.unicode_escape(&mut [0; 4])
+                                {
+                                    buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
+                                    offset = self.cur_ptr().add(1);
+                                    len += v.len();
+                                    continue;
+                                }
+
+                                if S::NULL_PADDED && tmp == 0 {
+                                    Kind::UnclosedString
+                                } else {
+                                    Kind::InvalidEscapeSequnce
+                                }
+                            }
+                            0x20.. => continue,
+                            0 if S::NULL_PADDED => Kind::Eof,
+                            _ => Kind::ControlCharacter,
+                        };
+                    };
+                    let err = self.close_string(err);
+                    let mut err = self.err(err);
+
+                    #[cfg(feature = "span")]
+                    (err.span[0] = start);
+
+                    if cap != 0 {
+                        dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
+                    }
+
+                    return Err(err);
+                }
+
+                if len == 0 {
+                    let tmp = from_raw_parts(offset, self.cur_ptr().offset_from_unsigned(offset));
+                    return if S::UTF8 || from_utf8(tmp).is_ok() {
+                        visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
+                    } else {
+                        Err(self.err(Kind::UnexpectedToken))
+                    };
+                }
+
+                let count = self.cur_ptr().offset_from_unsigned(offset);
+                let new_len = len + count;
+
+                if cap < new_len {
+                    let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
+
+                    // if the string had esc chars then it would've allocated already if
+                    // not it is returned above as borrowed string. so we can just use
+                    // realloc without checking.
+                    buf = realloc(
+                        buf,
+                        Layout::array::<u8>(cap).unwrap_unchecked(),
+                        layout.size(),
+                    );
+                    if buf.is_null() {
+                        handle_alloc_error(layout)
+                    }
+                    cap = new_len;
+                }
+
+                buf.add(len).copy_from_nonoverlapping(offset, count);
+
+                if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
+                    return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
+                }
+
+                if cap != 0 {
+                    dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
+                }
+
+                Err(self.err(Kind::UnexpectedToken))
+            },
+            #[cfg(not(feature = "alloc"))]
+            _ => unsafe {
+                const {
+                    assert!(
+                        S::INSITU,
+                        "string parsing involved, in-situ apis needed without `alloc`"
+                    )
+                }
+
+                // gotta use `unreachable_unchecked` for the plot
+                core::hint::unreachable_unchecked()
+            },
         }
     }
 
@@ -921,7 +953,10 @@ impl<'a, 'de, S: Source, C: Config> de::VariantAccess<'de> for UnitVariantAccess
 /// Represents error occurred while parsing.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Error {
+    #[cfg(feature = "alloc")]
     pub(super) kind: Box<Kind>,
+    #[cfg(not(feature = "alloc"))]
+    pub(super) kind: Kind,
     #[cfg(feature = "span")]
     pub(crate) span: [usize; 2],
 }
@@ -930,8 +965,10 @@ pub struct Error {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Kind {
     /// Serde specific error.
+    #[cfg(feature = "alloc")]
     Message(Box<str>),
-
+    #[cfg(not(feature = "alloc"))]
+    Unknown,
     /// Unexpected EOF while parsing.
     Eof,
     /// Expected colon while parsing object.
@@ -982,8 +1019,16 @@ impl Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(match &*self.kind {
+        #[cfg(feature = "alloc")]
+        let kind = &*self.kind;
+        #[cfg(not(feature = "alloc"))]
+        let kind = &self.kind;
+
+        f.write_str(match kind {
+            #[cfg(feature = "alloc")]
             Kind::Message(data) => data,
+            #[cfg(not(feature = "alloc"))]
+            Kind::Unknown => "unknown serde error",
             Kind::Eof => "eof while parsing",
             Kind::ExpectedColon => "expected colon",
             Kind::UnexpectedToken => "unexpected token",
@@ -1001,9 +1046,12 @@ impl Display for Error {
 }
 
 impl de::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
+    fn custom<T: Display>(_msg: T) -> Self {
         Error {
-            kind: Box::new(Kind::Message(msg.to_string().into_boxed_str())),
+            #[cfg(feature = "alloc")]
+            kind: Box::new(Kind::Message(_msg.to_string().into_boxed_str())),
+            #[cfg(not(feature = "alloc"))]
+            kind: Kind::Unknown,
             #[cfg(feature = "span")]
             span: [0; 2],
         }
@@ -1162,7 +1210,10 @@ const _: fn() = || {
         #[cold]
         fn into(self) -> Error {
             Error {
+                #[cfg(feature = "alloc")]
                 kind: Box::new(self),
+                #[cfg(not(feature = "alloc"))]
+                kind: self,
                 #[cfg(feature = "span")]
                 span: [0; 2],
             }
@@ -1252,6 +1303,7 @@ pub unsafe fn from_mut_slice_unchecked<'a, T: Deserialize<'a>>(s: &'a mut [u8]) 
 ///
 /// Same as [`from_str`] and will not perform UTF-8 validation.
 #[inline]
+#[cfg(feature = "alloc")]
 pub fn from_null_padded<'a, T: Deserialize<'a>>(buf: &'a NullPadded) -> Result<T> {
     T::deserialize(&mut Parser::new(buf))
 }
@@ -1260,6 +1312,7 @@ pub fn from_null_padded<'a, T: Deserialize<'a>>(buf: &'a NullPadded) -> Result<T
 ///
 /// Same as [`from_mut_str`] and will not perform UTF-8 validation.
 #[inline]
+#[cfg(feature = "alloc")]
 pub fn from_mut_null_padded<'a, T: Deserialize<'a>>(buf: &'a mut NullPadded) -> Result<T> {
     T::deserialize(&mut Parser::new(buf))
 }
@@ -1281,16 +1334,26 @@ pub fn from_mut_null_padded<'a, T: Deserialize<'a>>(buf: &'a mut NullPadded) -> 
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[inline]
-pub fn from_reader<R: Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
-    T::deserialize(&mut Parser::from_reader(rdr))
+#[cfg(feature = "std")]
+pub fn from_reader<R, T>(r: R) -> Result<T>
+where
+    R: Read,
+    T: de::DeserializeOwned,
+{
+    T::deserialize(&mut Parser::from_reader(r))
 }
 
 /// Deserializes specified type from a streaming source.
 ///
 /// Same as [`from_reader`] but will not perform UTF-8 validation.
 #[inline]
-pub unsafe fn from_reader_unchecked<R: Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
-    T::deserialize(&mut Parser::from_reader_unchecked(rdr))
+#[cfg(feature = "std")]
+pub unsafe fn from_reader_unchecked<R, T>(r: R) -> Result<T>
+where
+    R: Read,
+    T: de::DeserializeOwned,
+{
+    T::deserialize(&mut Parser::from_reader_unchecked(r))
 }
 
 /// Skips to the given path and deserializes the type using the provided parser.
@@ -1309,6 +1372,7 @@ pub unsafe fn from_reader_unchecked<R: Read, T: DeserializeOwned>(rdr: R) -> Res
 ///
 /// assert_eq!(val, 2);
 /// ```
+#[cfg(feature = "alloc")]
 pub fn get_with_parser<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> Result<T>
 where
     S: Source + 'a,
@@ -1329,6 +1393,7 @@ where
 /// - The JSON must be valid.
 /// - The path must exist.
 /// - The specified type must be deserializable from the provided JSON data.
+#[cfg(feature = "alloc")]
 pub unsafe fn get_with_parser_unchecked<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> T
 where
     S: Source + 'a,
@@ -1359,6 +1424,7 @@ where
 /// assert_eq!(invalid.unwrap_err().kind(), &Kind::TrailingComma);
 /// ```
 #[inline]
+#[cfg(feature = "alloc")]
 pub fn get_from<'a, S, T, P>(src: S, path: P) -> Result<T>
 where
     S: Source + 'a,
@@ -1386,6 +1452,7 @@ where
 /// assert_eq!(&res.to_le_bytes(), b"no");
 /// ```
 #[inline]
+#[cfg(feature = "alloc")]
 pub unsafe fn get_from_unchecked<'a, S, T, P>(src: S, path: P) -> T
 where
     S: Source + 'a,

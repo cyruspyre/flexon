@@ -1,9 +1,9 @@
-use core::ops::{Index, IndexMut};
-
 use crate::{
     Parser,
     value::lazy::{Raw, Value},
 };
+use alloc::vec::Vec;
+use core::ops::{Index, IndexMut};
 
 /// Represents a lazy JSON array.
 ///

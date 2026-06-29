@@ -1,6 +1,5 @@
-use core::{hint::select_unpredictable, slice::from_raw_parts, str::from_utf8_unchecked};
-
 use crate::{Parser, config::Config, misc::*, source::Source, value::builder::ErrorBuilder};
+use core::{hint::select_unpredictable, slice::from_raw_parts, str::from_utf8_unchecked};
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline]
@@ -15,6 +14,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     pub(crate) fn skip_value_unchecked(&mut self) {
         match self.skip_whitespace() {
             b'"' => self.skip_string_unchecked(),
@@ -166,6 +166,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     // typically this function rarely gets called so not worth complicating
+    #[cfg(feature = "alloc")]
     pub(crate) fn skip_string_unchecked(&mut self) {
         loop {
             if self.simd_str_unchecked() {
@@ -307,6 +308,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         return Err(err);
     }
 
+    #[cfg(any(feature = "alloc", all(feature = "serde", feature = "span")))]
     pub(crate) fn skip_literal_unchecked(&mut self) {
         loop {
             if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()

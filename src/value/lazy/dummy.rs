@@ -60,7 +60,7 @@ impl<S: Source> StringBuilder<'_, S, Error> for _String {
     }
 
     #[inline]
-    fn on_escape(&mut self, _: &[u8]) {}
+    unsafe fn on_escape(&mut self, _: &[u8]) {}
 
     #[inline]
     fn on_chunk(&mut self, _: &[u8]) {}
