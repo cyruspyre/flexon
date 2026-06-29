@@ -94,13 +94,17 @@ Same as other crates, nothing fancy.
 
 `comment`: Enables comment parsing. Follows JSONC specification.
 
-`prealloc` (default): Pre-allocates object/array based on its previous length. Has no effect in serde APIs. This is pretty niche but works well when the object/array is uniform. Might become an overhead instead when using custom allocators.
+`prealloc`: Pre-allocates object/array based on its previous length. Has no effect in serde APIs. This is pretty niche but works well when the object/array is uniform. Might become an overhead instead when using custom allocators.
 
 `span`: Enables span information on the parsed JSON data.
 
 `serde` (default): Implements serde specific APIs.
 
-`nightly`: Uses nightly features. Currently only `likely_unlikely` and `cold_path` are used.
+`nightly`: Uses nightly features. Currently only `likely_unlikely` is used.
+
+`std` (default): Enables functionality that depends on the standard library.
+
+`alloc` (default): Quite a lot of things depend on it, but the crate remains usable either way. When disabled, strings can only be parsed in place.
 
 # Performance
 
