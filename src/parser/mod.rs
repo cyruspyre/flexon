@@ -1,28 +1,32 @@
 mod skip;
-mod skip_to;
 mod unchecked;
 
+#[cfg(feature = "alloc")]
+mod skip_to;
+
+use crate::{
+    config::{CTConfig, Config},
+    misc::*,
+    simd::simd_u64,
+    source::*,
+    value::builder::*,
+};
 use core::{
     hint::select_unpredictable,
     marker::PhantomData,
     slice::from_raw_parts,
     str::{from_utf8_unchecked, from_utf8_unchecked_mut},
 };
-use std::io::Read;
-
 use simdutf8::compat::from_utf8;
 
-use crate::{
-    config::{CTConfig, Config},
-    misc::*,
-    pointer::JsonPointer,
-    simd::simd_u64,
-    source::*,
-    value::builder::*,
-};
+#[cfg(feature = "alloc")]
+use crate::JsonPointer;
+
+#[cfg(feature = "std")]
+use std::io::Read;
 
 #[cfg(feature = "comment")]
-use crate::Comment;
+use {crate::Comment, alloc::vec::Vec};
 
 // todo: trim source when skipping values
 
@@ -193,6 +197,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     ///
     /// assert_eq!(val.as_u64(), Some(201))
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn parse_at<V, P>(&mut self, p: P) -> Result<V, V::Error>
     where
         V: ValueBuilder<'a, S>,
@@ -255,6 +260,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     ///
     /// assert_eq!(val.as_u64(), Some(201))
     /// ```
+    #[cfg(feature = "alloc")]
     pub unsafe fn parse_at_unchecked<V, P>(&mut self, p: P) -> V
     where
         V: ValueBuilder<'a, S>,
@@ -324,6 +330,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline(always)]
+    #[cfg(feature = "alloc")]
     pub(crate) fn dec_if_not_empty(&mut self) {
         unsafe {
             let tmp = (self.src.len() != 0) as _;
@@ -1097,6 +1104,7 @@ impl<'a> Parser<'a, &'a mut str> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<R: Read> Parser<'_, Reader<false, R>> {
     /// Creates a parser from a type implementing [Read], with UTF-8 validation.
     ///
@@ -1107,6 +1115,7 @@ impl<R: Read> Parser<'_, Reader<false, R>> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<R: Read> Parser<'_, Reader<true, R>> {
     /// Creates a parser from a type implementing [Read], without UTF-8 validation.
     ///

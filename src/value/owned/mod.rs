@@ -2,12 +2,11 @@
 
 mod string;
 
+use crate::{pointer::JsonPointer, value::misc::define_value};
 use core::{
     mem::replace,
     ops::{Index, IndexMut},
 };
-
-use crate::{pointer::JsonPointer, value::misc::define_value};
 
 pub use string::String;
 

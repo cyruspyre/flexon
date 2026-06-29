@@ -1,10 +1,10 @@
-use core::{alloc::Layout, ptr::dangling_mut, slice::from_raw_parts_mut};
-use std::{
-    alloc::{alloc_zeroed, dealloc, realloc},
-    io::Read,
+use crate::{
+    misc::capacity_overflow,
+    source::{Source, Volatile},
 };
-
-use super::{Source, Volatile};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
+use core::{alloc::Layout, ptr::dangling_mut, slice::from_raw_parts_mut};
+use std::io::Read;
 
 /// A minimal buffered wrapper for types implementing [`Read`].
 pub struct Reader<const UTF8: bool, R> {
@@ -64,8 +64,8 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
 
     fn trim(&mut self, until: usize) {
         #[inline(never)]
-        unsafe fn shift<const V: bool, R: Read>(
-            this: &mut Reader<V, R>,
+        unsafe fn shift<const V: bool>(
+            this: &mut Reader<V, impl Read>,
             remaining: usize,
             until: usize,
         ) {
@@ -85,19 +85,33 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
 
     fn len(&mut self) -> usize {
         #[inline(never)]
-        unsafe fn load<const V: bool, R: Read>(this: &mut Reader<V, R>) {
+        unsafe fn load<const V: bool>(this: &mut Reader<V, impl Read>) {
             if this.cap - this.len < 1024 {
-                if this.cap != 0 {
-                    let new = this.cap * 2;
-                    let old = Layout::array::<u8>(this.cap).unwrap_unchecked();
-
-                    this.buf = realloc(this.buf, old, new);
-                    this.buf.add(this.cap).write_bytes(0, new - this.cap);
-                    this.cap = new;
+                let layout;
+                let new_cap;
+                let new_buf = if this.cap != 0 {
+                    if let Some(a) = this.cap.checked_mul(2)
+                        && let Ok(b) = Layout::array::<u8>(a)
+                    {
+                        layout = b;
+                        new_cap = a;
+                        realloc(this.buf, layout, new_cap)
+                    } else {
+                        capacity_overflow()
+                    }
                 } else {
-                    this.buf = alloc_zeroed(Layout::array::<u8>(1024).unwrap_unchecked());
-                    this.cap = 1024;
+                    new_cap = 1024;
+                    layout = Layout::array::<u8>(1024).unwrap_unchecked();
+                    alloc(layout)
+                };
+
+                if new_buf.is_null() {
+                    handle_alloc_error(layout)
                 }
+
+                new_buf.add(this.cap).write_bytes(0, new_cap - this.cap);
+                this.buf = new_buf;
+                this.cap = new_cap;
             }
 
             this.len += this

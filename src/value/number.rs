@@ -37,6 +37,7 @@ impl Number {
     }
 
     /// Returns the number as `u64`, or `None` if it is not a positive integer.
+    #[inline]
     pub fn as_u64(&self) -> Option<u64> {
         match self.0 {
             Kind::Unsigned(v) => Some(v),
@@ -45,6 +46,7 @@ impl Number {
     }
 
     /// Returns the number as `i64`, or `None` if it is not a negative integer.
+    #[inline]
     pub fn as_i64(&self) -> Option<i64> {
         match self.0 {
             Kind::Signed(v) => Some(v),
@@ -53,6 +55,7 @@ impl Number {
     }
 
     /// Returns the number as `f64`, or `None` if it is not a float.
+    #[inline]
     pub fn as_f64(&self) -> Option<f64> {
         match self.0 {
             Kind::Float(v) => Some(v),
@@ -61,16 +64,19 @@ impl Number {
     }
 
     /// Returns `true` if the number is an unsigned integer or a positive integer.
+    #[inline]
     pub fn is_u64(&self) -> bool {
         self.as_u64().is_some()
     }
 
     /// Returns `true` if the number is a signed integer or a negative integer.
+    #[inline]
     pub fn is_i64(&self) -> bool {
         self.as_i64().is_some()
     }
 
     /// Returns `true` if the number is a float.
+    #[inline]
     pub fn is_f64(&self) -> bool {
         self.as_f64().is_some()
     }

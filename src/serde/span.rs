@@ -1,14 +1,12 @@
+use crate::{Parser, config::Config, serde::de::Error, source::Source, span::Span};
 use core::{
     fmt::{self, Formatter},
     marker::PhantomData,
 };
-
-use serde::{
+use serde_core::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, DeserializeSeed, IntoDeserializer, SeqAccess},
 };
-
-use crate::{Parser, config::Config, serde::de::Error, source::Source, span::Span};
 
 pub const TOKEN: &str = "$flexon::Span";
 

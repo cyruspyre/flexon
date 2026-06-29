@@ -1,11 +1,10 @@
 //! Formats for JSON serialization.
 
-use std::io::Write;
-
 use crate::{
     misc::Sealed,
     serde::ser::{Error, Result},
 };
+use std::io::Write;
 
 /// Controls how JSON output is formatted.
 pub trait Format: Sealed + Sized {

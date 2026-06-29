@@ -4,18 +4,16 @@ mod array;
 mod dummy;
 mod object;
 
-use core::{
-    fmt::{self, Debug, Formatter},
-    hint::unreachable_unchecked,
-    ops::{Deref, Index, IndexMut},
-    str::from_utf8_unchecked,
-};
-
 use crate::{
     Error, Parser,
     pointer::JsonPointer,
     source::{NonVolatile, Source},
     value::{Number, borrowed::String, builder::ValueBuilder, lazy::dummy::*},
+};
+use core::{
+    fmt::{self, Debug, Formatter},
+    hint::unreachable_unchecked,
+    ops::{Deref, Index, IndexMut},
 };
 
 pub use {array::Array, object::Object};
@@ -491,7 +489,7 @@ impl<'a, S: Source<Volatility = NonVolatile>> ValueBuilder<'a, S> for Value<'a> 
 
     #[inline]
     fn raw(s: &'a [u8]) -> Self {
-        Self::Raw(Raw(unsafe { from_utf8_unchecked(s) }))
+        Self::Raw(Raw(unsafe { str::from_utf8_unchecked(s) }))
     }
 
     #[inline]

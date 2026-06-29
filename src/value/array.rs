@@ -1,26 +1,25 @@
+use crate::{misc::capacity_overflow, value::builder::ArrayBuilder};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
 use core::{
     alloc::Layout,
     fmt::{Debug, Formatter, Result},
     ops::{Deref, DerefMut},
-    ptr::{dangling_mut, slice_from_raw_parts_mut},
+    ptr::{NonNull, slice_from_raw_parts_mut},
     slice::{from_raw_parts, from_raw_parts_mut},
 };
-use std::alloc::{alloc, dealloc, realloc};
-
-use crate::value::builder::ArrayBuilder;
 
 /// Represents a JSON array.
-pub struct Array<V> {
-    buf: *mut V,
+pub struct Array<T> {
+    buf: NonNull<T>,
     len: usize,
     cap: usize,
 }
 
-impl<V> ArrayBuilder<V> for Array<V> {
+impl<T> ArrayBuilder<T> for Array<T> {
     #[inline]
     fn new() -> Self {
         Self {
-            buf: dangling_mut(),
+            buf: NonNull::dangling(),
             len: 0,
             cap: 0,
         }
@@ -30,9 +29,16 @@ impl<V> ArrayBuilder<V> for Array<V> {
     fn with_capacity(cap: usize) -> Self {
         Self {
             buf: if cap != 0 {
-                unsafe { alloc(Layout::array::<V>(cap).unwrap_unchecked()).cast() }
+                let Ok(layout) = Layout::array::<T>(cap) else {
+                    capacity_overflow()
+                };
+
+                match unsafe { NonNull::new(alloc(layout).cast()) } {
+                    Some(v) => v,
+                    _ => handle_alloc_error(layout),
+                }
             } else {
-                dangling_mut()
+                NonNull::dangling()
             },
             len: 0,
             cap,
@@ -45,61 +51,75 @@ impl<V> ArrayBuilder<V> for Array<V> {
     }
 
     #[inline]
-    fn on_value(&mut self, val: V) {
+    fn on_value(&mut self, val: T) {
         self.len += 1;
 
         if self.cap < self.len {
-            let new_cap = self.len * 2;
+            if let Some(new_cap) = self.len.checked_mul(2)
+                && let Ok(layout) = Layout::array::<T>(new_cap)
+            {
+                let new_buf = unsafe {
+                    if self.cap != 0 {
+                        realloc(
+                            self.buf.as_ptr().cast(),
+                            Layout::array::<T>(self.cap).unwrap_unchecked(),
+                            layout.size(),
+                        )
+                    } else {
+                        alloc(layout)
+                    }
+                };
 
-            self.buf = unsafe {
-                let layout = Layout::array::<V>(new_cap).unwrap_unchecked();
-                if self.cap != 0 {
-                    realloc(
-                        self.buf.cast(),
-                        Layout::array::<V>(self.cap).unwrap_unchecked(),
-                        layout.size(),
-                    )
-                } else {
-                    alloc(layout)
+                match NonNull::new(new_buf.cast()) {
+                    Some(v) => {
+                        self.cap = new_cap;
+                        self.buf = v;
+                    }
+                    _ => handle_alloc_error(layout),
                 }
-                .cast()
-            };
-            self.cap = new_cap;
+            } else {
+                capacity_overflow()
+            }
         }
 
-        unsafe { self.buf.add(self.len - 1).write(val) }
+        unsafe { self.buf.add(self.len).sub(1).write(val) }
     }
 
     #[inline]
     fn on_complete(&mut self) {}
 }
 
-impl<V: PartialEq> PartialEq for Array<V> {
+impl<T: PartialEq> PartialEq for Array<T> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.deref() == other.deref()
     }
 }
 
-impl<V: Eq> Eq for Array<V> {}
+impl<T: Eq> Eq for Array<T> {}
 
-impl<V: Clone> Clone for Array<V> {
+impl<T: Clone> Clone for Array<T> {
     fn clone(&self) -> Self {
         if self.len != 0 {
             unsafe {
-                let buf: *mut V = alloc(Layout::array::<V>(self.cap).unwrap_unchecked()).cast();
+                let layout = Layout::array::<T>(self.len).unwrap_unchecked();
+                let Some(buf) = NonNull::new(alloc(layout).cast()) else {
+                    handle_alloc_error(layout)
+                };
+
                 for i in 0..self.len {
-                    buf.add(i).write((&*self.buf.add(i)).clone())
+                    buf.add(i).write(self.buf.add(i).as_ref().clone())
                 }
+
                 Self {
                     buf,
                     len: self.len,
-                    cap: self.cap,
+                    cap: self.len,
                 }
             }
         } else {
             Self {
-                buf: dangling_mut(),
+                buf: NonNull::dangling(),
                 len: 0,
                 cap: 0,
             }
@@ -107,36 +127,37 @@ impl<V: Clone> Clone for Array<V> {
     }
 }
 
-impl<V> Deref for Array<V> {
-    type Target = [V];
+impl<T> Deref for Array<T> {
+    type Target = [T];
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        unsafe { from_raw_parts(self.buf, self.len) }
+        unsafe { from_raw_parts(self.buf.as_ptr(), self.len) }
     }
 }
 
-impl<V> DerefMut for Array<V> {
+impl<T> DerefMut for Array<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { from_raw_parts_mut(self.buf, self.len) }
+        unsafe { from_raw_parts_mut(self.buf.as_ptr(), self.len) }
     }
 }
 
-impl<V: Debug> Debug for Array<V> {
+impl<T: Debug> Debug for Array<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         self.deref().fmt(f)
     }
 }
 
-impl<V> Drop for Array<V> {
+impl<T> Drop for Array<T> {
     fn drop(&mut self) {
         if self.cap != 0 {
             unsafe {
-                slice_from_raw_parts_mut(self.buf, self.len).drop_in_place();
+                slice_from_raw_parts_mut(self.buf.as_ptr(), self.len).drop_in_place();
                 dealloc(
-                    self.buf.cast(),
-                    Layout::array::<V>(self.cap).unwrap_unchecked(),
+                    self.buf.as_ptr().cast(),
+                    Layout::array::<T>(self.cap).unwrap_unchecked(),
                 );
             }
         }

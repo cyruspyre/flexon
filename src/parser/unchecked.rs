@@ -1,6 +1,5 @@
-use core::{hint::unreachable_unchecked, slice::from_raw_parts};
-
 use crate::{Parser, config::Config, misc::*, source::*, value::builder::*};
+use core::{hint::unreachable_unchecked, slice::from_raw_parts};
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline]

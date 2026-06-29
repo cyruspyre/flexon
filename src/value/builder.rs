@@ -62,7 +62,7 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
 }
 
 /// Trait for building JSON array during parsing.
-pub trait ArrayBuilder<V> {
+pub trait ArrayBuilder<T> {
     /// Create a new array builder.
     fn new() -> Self;
 
@@ -75,7 +75,7 @@ pub trait ArrayBuilder<V> {
     fn len(&self) -> usize;
 
     /// Adds a value to the array.
-    fn on_value(&mut self, val: V);
+    fn on_value(&mut self, val: T);
 
     /// Called when array parsing completes, e.g., for sorting.
     fn on_complete(&mut self);
@@ -114,9 +114,14 @@ pub trait StringBuilder<'a, S: Source, E: ErrorBuilder> {
 
     /// Called when the parser encounters escape sequence. The given byte slice will be the parsed escape
     /// sequence and the length will be less than or equal to 4.
-    fn on_escape(&mut self, s: &[u8]);
+    ///
+    /// # Safety
+    /// The caller must uphold the following invariants:
+    /// - This instance must have been created via [`Self::new`].
+    /// - [`Self::on_chunk`] must have been called before this.
+    unsafe fn on_escape(&mut self, s: &[u8]);
 
-    /// Called before calling [`StringBuilder::on_escape`].
+    /// Called before calling [`Self::on_escape`].
     ///
     /// This is the byte slice before escape sequence excluding `'\'` at the end.
     fn on_chunk(&mut self, s: &'a [u8]);
