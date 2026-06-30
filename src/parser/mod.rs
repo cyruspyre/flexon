@@ -247,47 +247,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
     }
 
-    /// Skips to the given path and parses JSON into the specified type.
-    ///
-    /// Same as [`Parser::parse_at`] but wihout validation. There is no
-    /// guarantee if the JSON is invalid or the path does not exist.
-    ///
-    /// # Example
-    /// ```
-    /// use flexon::{Parser, Value};
-    ///
-    /// let val: Value = unsafe { Parser::from_str(r#"[101, 201]"#).parse_at_unchecked([1]) };
-    ///
-    /// assert_eq!(val.as_u64(), Some(201))
-    /// ```
-    #[cfg(feature = "alloc")]
-    pub unsafe fn parse_at_unchecked<V, P>(&mut self, p: P) -> V
-    where
-        V: ValueBuilder<'a, S>,
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
-        const {
-            assert!(
-                !(V::LAZY & S::Volatility::IS_VOLATILE),
-                "source must be non volatile if the value builder is lazy"
-            )
-        }
-
-        let char = self._skip_to_unchecked(p);
-
-        if V::LAZY {
-            V::raw(from_raw_parts(self.cur_ptr(), self.src.len() - self.idx()))
-        } else {
-            match char {
-                b'"' => self.string_unchecked::<_, V::String, _>(),
-                b'{' => self.object_unchecked(),
-                b'[' => self.array_unchecked(),
-                _ => self.literal_unchecked(),
-            }
-        }
-    }
-
     /// Consumes the parser and returns the accumulated comments.
     ///
     /// # Example
@@ -1030,6 +989,42 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
 
         (val, false)
+    }
+}
+
+impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
+    /// Skips to the given path and parses JSON into the specified type.
+    ///
+    /// Same as [`Parser::parse_at`] but wihout validation. There is no
+    /// guarantee if the JSON is invalid or the path does not exist.
+    ///
+    /// # Example
+    /// ```
+    /// use flexon::{Parser, Value};
+    ///
+    /// let val: Value = unsafe { Parser::from_str(r#"[101, 201]"#).parse_at_unchecked([1]) };
+    ///
+    /// assert_eq!(val.as_u64(), Some(201))
+    /// ```
+    #[cfg(feature = "alloc")]
+    pub unsafe fn parse_at_unchecked<V, P>(&mut self, p: P) -> V
+    where
+        V: ValueBuilder<'a, S>,
+        P: IntoIterator,
+        P::Item: JsonPointer,
+    {
+        let char = self._skip_to_unchecked(p);
+
+        if V::LAZY {
+            V::raw(from_raw_parts(self.cur_ptr(), self.src.len() - self.idx()))
+        } else {
+            match char {
+                b'"' => self.string_unchecked::<_, V::String, _>(),
+                b'{' => self.object_unchecked(),
+                b'[' => self.array_unchecked(),
+                _ => self.literal_unchecked(),
+            }
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use crate::{
     config::Config,
     misc::{ESC_LUT, capacity_overflow},
     pointer::JsonPointer,
-    source::{Source, Volatility},
+    source::{NonVolatile, Source, Volatility},
     value::{borrowed::String, builder::ErrorBuilder},
 };
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
@@ -40,19 +40,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         self._skip_to(p)?;
         self.dec_if_not_empty();
         Ok(())
-    }
-
-    /// Skips to the given path without validation.
-    ///
-    /// Same as [`Parser::skip_to`] but if the JSON is invalid or
-    /// the path does not exist, then there is no guarantee of this function.
-    pub unsafe fn skip_to_unchecked<P>(&mut self, p: P)
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
-        self._skip_to_unchecked(p);
-        self.dec();
     }
 
     #[inline(always)]
@@ -204,65 +191,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         Ok(char)
     }
 
-    #[inline(always)]
-    pub(crate) unsafe fn _skip_to_unchecked<P>(&mut self, p: P) -> u8
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
-        const {
-            assert!(
-                !S::Volatility::IS_VOLATILE,
-                "volatile source is problematic with unchecked skipping APIs, use checked ones instead"
-            )
-        }
-
-        let mut char = self.skip_whitespace();
-
-        'main: for pointer in p {
-            if let Some(key) = pointer.as_key() {
-                loop {
-                    self.skip_whitespace(); // skip '"'
-                    let new = self.string_unchecked2();
-                    self.skip_whitespace(); // skip ':'
-                    char = self.skip_whitespace();
-
-                    if &*new == key {
-                        continue 'main;
-                    }
-
-                    match char {
-                        b'"' => self.skip_string_unchecked(),
-                        b'{' | b'[' => self.skip_container_unchecked(),
-                        _ => self.skip_literal_unchecked(),
-                    }
-                    self.skip_whitespace(); // skip ','
-                }
-            }
-
-            let Some(mut idx) = pointer.as_index() else {
-                unreachable_unchecked()
-            };
-
-            loop {
-                char = self.skip_whitespace();
-                if idx == 0 {
-                    continue 'main;
-                }
-
-                idx -= 1;
-                match char {
-                    b'"' => self.skip_string_unchecked(),
-                    b'{' | b'[' => self.skip_container_unchecked(),
-                    _ => self.skip_literal_unchecked(),
-                }
-                self.skip_whitespace(); // skip ','
-            }
-        }
-
-        char
-    }
-
     unsafe fn string2<E: ErrorBuilder>(&mut self) -> Result<String<'a>, E> {
         let mut offset = self.idx() + 1;
         let mut buf = dangling_mut();
@@ -383,6 +311,73 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         buf.add(len)
             .copy_from_nonoverlapping(self.src.ptr(offset), count);
         Ok(String::from_raw_parts(buf, new_len, cap))
+    }
+}
+
+impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
+    /// Skips to the given path without validation.
+    ///
+    /// Same as [`Parser::skip_to`] but if the JSON is invalid or
+    /// the path does not exist, then there is no guarantee of this function.
+    pub unsafe fn skip_to_unchecked<P>(&mut self, p: P)
+    where
+        P: IntoIterator,
+        P::Item: JsonPointer,
+    {
+        self._skip_to_unchecked(p);
+        self.dec();
+    }
+
+    #[inline(always)]
+    pub(crate) unsafe fn _skip_to_unchecked<P>(&mut self, p: P) -> u8
+    where
+        P: IntoIterator,
+        P::Item: JsonPointer,
+    {
+        let mut char = self.skip_whitespace();
+
+        'main: for pointer in p {
+            if let Some(key) = pointer.as_key() {
+                loop {
+                    self.skip_whitespace(); // skip '"'
+                    let new = self.string_unchecked2();
+                    self.skip_whitespace(); // skip ':'
+                    char = self.skip_whitespace();
+
+                    if &*new == key {
+                        continue 'main;
+                    }
+
+                    match char {
+                        b'"' => self.skip_string_unchecked(),
+                        b'{' | b'[' => self.skip_container_unchecked(),
+                        _ => self.skip_literal_unchecked(),
+                    }
+                    self.skip_whitespace(); // skip ','
+                }
+            }
+
+            let Some(mut idx) = pointer.as_index() else {
+                unreachable_unchecked()
+            };
+
+            loop {
+                char = self.skip_whitespace();
+                if idx == 0 {
+                    continue 'main;
+                }
+
+                idx -= 1;
+                match char {
+                    b'"' => self.skip_string_unchecked(),
+                    b'{' | b'[' => self.skip_container_unchecked(),
+                    _ => self.skip_literal_unchecked(),
+                }
+                self.skip_whitespace(); // skip ','
+            }
+        }
+
+        char
     }
 
     /// This function is used for matching against object key when using

@@ -21,8 +21,10 @@ use simdutf8::basic::from_utf8;
 #[cfg(feature = "alloc")]
 use {
     crate::{
-        misc::capacity_overflow, pointer::JsonPointer, serde::unchecked::Unchecked,
-        source::NullPadded,
+        misc::capacity_overflow,
+        pointer::JsonPointer,
+        serde::unchecked::Unchecked,
+        source::{NonVolatile, NullPadded},
     },
     alloc::{
         alloc::{alloc, dealloc, handle_alloc_error, realloc},
@@ -1396,7 +1398,7 @@ where
 #[cfg(feature = "alloc")]
 pub unsafe fn get_with_parser_unchecked<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> T
 where
-    S: Source + 'a,
+    S: Source<Volatility = NonVolatile> + 'a,
     C: Config,
     T: Deserialize<'a>,
     P: IntoIterator,
@@ -1455,7 +1457,7 @@ where
 #[cfg(feature = "alloc")]
 pub unsafe fn get_from_unchecked<'a, S, T, P>(src: S, path: P) -> T
 where
-    S: Source + 'a,
+    S: Source<Volatility = NonVolatile> + 'a,
     T: Deserialize<'a>,
     P: IntoIterator,
     P::Item: JsonPointer,
