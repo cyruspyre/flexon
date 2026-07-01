@@ -1,10 +1,9 @@
 mod skip;
+mod skip_to;
 mod unchecked;
 
-#[cfg(feature = "alloc")]
-mod skip_to;
-
 use crate::{
+    JsonPointer,
     config::{CTConfig, Config},
     misc::*,
     simd::simd_u64,
@@ -18,9 +17,6 @@ use core::{
     str::{from_utf8_unchecked, from_utf8_unchecked_mut},
 };
 use simdutf8::compat::from_utf8;
-
-#[cfg(feature = "alloc")]
-use crate::JsonPointer;
 
 #[cfg(feature = "std")]
 use std::io::Read;
@@ -197,7 +193,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     ///
     /// assert_eq!(val.as_u64(), Some(201))
     /// ```
-    #[cfg(feature = "alloc")]
     pub fn parse_at<V, P>(&mut self, p: P) -> Result<V, V::Error>
     where
         V: ValueBuilder<'a, S>,
@@ -289,7 +284,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline(always)]
-    #[cfg(feature = "alloc")]
     pub(crate) fn dec_if_not_empty(&mut self) {
         unsafe {
             let tmp = (self.src.len() != 0) as _;
@@ -1006,7 +1000,6 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
     ///
     /// assert_eq!(val.as_u64(), Some(201))
     /// ```
-    #[cfg(feature = "alloc")]
     pub unsafe fn parse_at_unchecked<V, P>(&mut self, p: P) -> V
     where
         V: ValueBuilder<'a, S>,

@@ -3,32 +3,26 @@
 pub mod builder;
 pub(crate) mod number;
 
-#[cfg(feature = "alloc")]
-mod array;
-#[cfg(feature = "alloc")]
-pub mod borrowed;
-#[cfg(feature = "alloc")]
-pub mod lazy;
-#[cfg(feature = "alloc")]
-mod misc;
-#[cfg(feature = "alloc")]
-mod object;
-#[cfg(feature = "alloc")]
-pub mod owned;
-
 pub use number::Number;
 
-#[cfg(feature = "alloc")]
-pub use array::Array;
-#[cfg(feature = "alloc")]
-pub use object::Object;
+cfg_select! {
+    feature = "alloc" => {
+        mod array;
+        pub mod borrowed;
+        pub mod lazy;
+        mod misc;
+        mod object;
+        pub mod owned;
 
-#[doc(inline)]
-#[cfg(feature = "alloc")]
-pub use borrowed::Value;
-#[cfg(feature = "alloc")]
-#[doc(inline)]
-pub use lazy::Value as LazyValue;
-#[doc(inline)]
-#[cfg(feature = "alloc")]
-pub use owned::Value as OwnedValue;
+        pub use array::Array;
+        pub use object::Object;
+
+        #[doc(inline)]
+        pub use borrowed::Value;
+        #[doc(inline)]
+        pub use lazy::Value as LazyValue;
+        #[doc(inline)]
+        pub use owned::Value as OwnedValue;
+    }
+    _ => {}
+}

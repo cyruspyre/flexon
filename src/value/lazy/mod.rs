@@ -234,7 +234,7 @@ impl<'a> Value<'a> {
                 let mut tmp = Parser::new(s);
 
                 tmp.inc(1);
-                *self = Self::String(tmp.string_unchecked2());
+                *self = Self::String(tmp.string_unchecked::<_, String, Error>());
 
                 match self {
                     Self::String(v) => v,
@@ -372,7 +372,7 @@ impl<'a> Value<'a> {
                 loop {
                     match tmp.skip_whitespace() {
                         b'"' => unsafe {
-                            let new = tmp.string_unchecked2();
+                            let new = tmp.string_unchecked::<String, String, Error>();
                             tmp.skip_whitespace(); // skip ':'
                             char = tmp.skip_whitespace();
 

@@ -1,6 +1,5 @@
 use crate::{
-    Parser,
-    value::{
+    Error, Parser, value::{
         borrowed::String,
         lazy::{Raw, Value},
     },
@@ -48,7 +47,7 @@ impl<'a> Object<'a> {
         loop {
             match tmp.skip_whitespace() {
                 b'"' => unsafe {
-                    let new = tmp.string_unchecked2();
+                    let new = tmp.string_unchecked::<String, String, Error>();
                     tmp.skip_whitespace(); // skip ':'
                     let wtf = tmp.skip_whitespace();
 

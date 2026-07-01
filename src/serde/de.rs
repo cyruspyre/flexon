@@ -1,10 +1,11 @@
 //! Deserialize JSON using serde.
 
 use crate::{
-    Parser,
+    JsonPointer, Parser,
     config::Config,
     misc::{ESC_LUT, NUM_LUT, unlikely},
-    source::{Source, Volatility},
+    serde::unchecked::Unchecked,
+    source::{NonVolatile, Source, Volatility},
 };
 use core::{
     fmt::{self, Display, Formatter},
@@ -20,12 +21,7 @@ use simdutf8::basic::from_utf8;
 
 #[cfg(feature = "alloc")]
 use {
-    crate::{
-        misc::capacity_overflow,
-        pointer::JsonPointer,
-        serde::unchecked::Unchecked,
-        source::{NonVolatile, NullPadded},
-    },
+    crate::{misc::capacity_overflow, source::NullPadded},
     alloc::{
         alloc::{alloc, dealloc, handle_alloc_error, realloc},
         boxed::Box,
@@ -1374,7 +1370,6 @@ where
 ///
 /// assert_eq!(val, 2);
 /// ```
-#[cfg(feature = "alloc")]
 pub fn get_with_parser<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> Result<T>
 where
     S: Source + 'a,
@@ -1395,7 +1390,6 @@ where
 /// - The JSON must be valid.
 /// - The path must exist.
 /// - The specified type must be deserializable from the provided JSON data.
-#[cfg(feature = "alloc")]
 pub unsafe fn get_with_parser_unchecked<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> T
 where
     S: Source<Volatility = NonVolatile> + 'a,
@@ -1426,7 +1420,6 @@ where
 /// assert_eq!(invalid.unwrap_err().kind(), &Kind::TrailingComma);
 /// ```
 #[inline]
-#[cfg(feature = "alloc")]
 pub fn get_from<'a, S, T, P>(src: S, path: P) -> Result<T>
 where
     S: Source + 'a,
@@ -1454,7 +1447,6 @@ where
 /// assert_eq!(&res.to_le_bytes(), b"no");
 /// ```
 #[inline]
-#[cfg(feature = "alloc")]
 pub unsafe fn get_from_unchecked<'a, S, T, P>(src: S, path: P) -> T
 where
     S: Source<Volatility = NonVolatile> + 'a,

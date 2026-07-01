@@ -14,7 +14,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline]
-    #[cfg(feature = "alloc")]
+    #[cfg(any(feature = "alloc", feature = "serde"))]
     pub(crate) fn skip_value_unchecked(&mut self) {
         match self.skip_whitespace() {
             b'"' => self.skip_string_unchecked(),
@@ -166,7 +166,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     // typically this function rarely gets called so not worth complicating
-    #[cfg(feature = "alloc")]
     pub(crate) fn skip_string_unchecked(&mut self) {
         loop {
             if self.simd_str_unchecked() {
@@ -308,7 +307,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         return Err(err);
     }
 
-    #[cfg(any(feature = "alloc", all(feature = "serde", feature = "span")))]
     pub(crate) fn skip_literal_unchecked(&mut self) {
         loop {
             if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()

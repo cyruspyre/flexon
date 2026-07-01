@@ -28,6 +28,7 @@ enum Inner<'a> {
 
 impl<'a> String<'a> {
     #[inline]
+    #[cfg(feature = "serde")]
     pub(crate) fn from_raw_parts(buf: *mut u8, len: usize, cap: usize) -> Self {
         Self(Inner::Heap { buf, len, cap })
     }
