@@ -128,12 +128,12 @@ where
     }
 
     #[inline]
-    fn on_chunk(&mut self, s: &'a [u8]) {
+    unsafe fn on_chunk(&mut self, s: &'a [u8]) {
         self.data.on_chunk(s)
     }
 
     #[inline]
-    fn on_final_chunk(&mut self, s: &'a [u8]) {
+    unsafe fn on_final_chunk(&mut self, s: &'a [u8]) {
         self.data.on_final_chunk(s)
     }
 
