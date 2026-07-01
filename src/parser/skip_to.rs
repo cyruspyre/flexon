@@ -1,16 +1,23 @@
 use crate::{
     Parser,
     config::Config,
-    misc::{ESC_LUT, capacity_overflow},
+    misc::ESC_LUT,
     pointer::JsonPointer,
-    source::{NonVolatile, Source, Volatility},
-    value::{borrowed::String, builder::ErrorBuilder},
+    source::{NonVolatile, Source},
+    utf8,
+    value::builder::ErrorBuilder,
 };
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
-use core::{
-    alloc::Layout, hint::unreachable_unchecked, ptr::dangling_mut, slice::from_raw_parts,
-    str::from_utf8_unchecked,
-};
+use core::hint::unreachable_unchecked;
+
+// ehh... used in the string matching functions below to just keep
+// reading and make their subsequent matches invalid once invalidated.
+//
+// INVALID[0]: start points here on mismatch, so it stays mismatched forever.
+//
+// INVALID[1]: used as both start and end when target is empty, so an empty JSON
+//             key matches; distinct address from [0] as such a mismatch
+//             doesn't accidentally satisfy `start == end` at return.
+static INVALID: [u8; 2] = [0xFF; 2];
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     /// Skips to the given path.
@@ -73,13 +80,13 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         break E::unexpected_token();
                     }
 
-                    let new = unsafe { self.string2()? };
+                    let matches = unsafe { self.string_match(key)? };
                     if self.skip_whitespace() != b':' {
                         break E::expected_colon();
                     }
 
                     char = self.skip_whitespace();
-                    if &*new == key {
+                    if matches {
                         continue 'main;
                     }
 
@@ -191,126 +198,75 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         Ok(char)
     }
 
-    unsafe fn string2<E: ErrorBuilder>(&mut self) -> Result<String<'a>, E> {
-        let mut offset = self.idx() + 1;
-        let mut buf = dangling_mut();
-        let mut cap = 0;
-        let mut len = 0;
+    unsafe fn string_match<E: ErrorBuilder>(&mut self, target: &str) -> Result<bool, E> {
+        let mut utf8 = utf8::Parser::new();
+        let (mut start, end) = if target.is_empty() {
+            (&raw const INVALID[1], &raw const INVALID[1])
+        } else {
+            (target.as_ptr(), target.as_ptr().add(target.len()))
+        };
 
-        'main: {
-            let err = loop {
-                if self.simd_str() {
+        let err = loop {
+            self.inc(1);
+            if !S::NULL_PADDED && self.idx() >= self.src.len() {
+                break E::unclosed_string();
+            }
+
+            break match self.cur() {
+                b'"' => {
+                    if !S::UTF8 && utf8.is_expecting() {
+                        break E::unexpected_token();
+                    }
+
+                    return Ok(start == end);
+                }
+                b'\\' => {
+                    self.inc(1);
+                    if !S::NULL_PADDED && self.idx() == self.src.len() {
+                        break E::unclosed_string();
+                    }
+
+                    let cur = self.cur();
+                    let esc = ESC_LUT[cur as usize];
+
+                    if esc != 0 {
+                        start = match start != end && *start == esc {
+                            true => start.add(1),
+                            _ => &raw const INVALID[0],
+                        };
+                        continue;
+                    }
+
+                    if cur == b'u'
+                        && let Some(esc) = self.unicode_escape(&mut [0; 4])
+                    {
+                        for &v in esc {
+                            start = match start != end && *start == v {
+                                true => start.add(1),
+                                _ => &raw const INVALID[0],
+                            }
+                        }
+                        continue;
+                    }
+
+                    E::invalid_escape()
+                }
+                v @ 0x20.. => {
+                    if !S::UTF8 && utf8.advance(v) {
+                        break E::unexpected_token();
+                    }
+
+                    start = match start != end && *start == v {
+                        true => start.add(1),
+                        _ => &raw const INVALID[0],
+                    };
                     continue;
                 }
-
-                self.inc(1);
-                if !S::NULL_PADDED && self.idx() >= self.src.len() {
-                    break E::unclosed_string();
-                }
-
-                break match self.cur() {
-                    b'"' => break 'main,
-                    b'\\' => {
-                        let count = self.idx() - offset;
-                        let new_len = len + count + 4;
-
-                        if cap < new_len {
-                            let tmp = new_len + new_len / 4;
-                            let Ok(layout) = Layout::array::<u8>(tmp) else {
-                                capacity_overflow()
-                            };
-
-                            buf = if cap != 0 {
-                                realloc(
-                                    buf,
-                                    Layout::array::<u8>(cap).unwrap_unchecked(),
-                                    layout.size(),
-                                )
-                            } else {
-                                alloc(layout)
-                            };
-                            if buf.is_null() {
-                                handle_alloc_error(layout)
-                            }
-                            cap = tmp;
-                        }
-
-                        buf.add(len)
-                            .copy_from_nonoverlapping(self.src.ptr(offset), count);
-                        self.inc(1);
-
-                        len += count;
-                        offset = self.idx() + 1;
-
-                        if !S::NULL_PADDED && self.idx() == self.src.len() {
-                            break E::unclosed_string();
-                        }
-
-                        let tmp = self.cur();
-                        let buf = buf.add(len);
-                        let esc = ESC_LUT[tmp as usize];
-
-                        if esc != 0 {
-                            buf.write(esc);
-                            len += 1;
-                            continue;
-                        }
-
-                        if tmp == b'u'
-                            && let Some(v) = self.unicode_escape(&mut [0; 4])
-                        {
-                            buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
-                            offset = self.idx() + 1;
-                            len += v.len();
-                            continue;
-                        }
-
-                        E::invalid_escape()
-                    }
-                    0x20.. => continue,
-                    _ => E::control_character(),
-                };
+                _ => E::control_character(),
             };
+        };
 
-            if cap != 0 {
-                dealloc(buf, Layout::array::<u8>(cap).unwrap_unchecked())
-            }
-
-            return Err(err);
-        }
-
-        if !S::Volatility::IS_VOLATILE && len == 0 {
-            // utf-8 validation is unnecessary here its going to match against string slice
-            return Ok(String::from(from_utf8_unchecked(from_raw_parts(
-                self.src.ptr(offset),
-                self.idx() - offset,
-            ))));
-        }
-
-        let count = self.idx() - offset;
-        let new_len = len + count;
-
-        if cap < new_len {
-            let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
-
-            buf = if !(S::Volatility::IS_VOLATILE && cap == 0) {
-                realloc(
-                    buf,
-                    Layout::array::<u8>(cap).unwrap_unchecked(),
-                    layout.size(),
-                )
-            } else {
-                alloc(layout)
-            };
-            if buf.is_null() {
-                handle_alloc_error(layout)
-            }
-            cap = new_len;
-        }
-
-        buf.add(len)
-            .copy_from_nonoverlapping(self.src.ptr(offset), count);
-        Ok(String::from_raw_parts(buf, new_len, cap))
+        Err(err)
     }
 }
 
@@ -340,11 +296,11 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
             if let Some(key) = pointer.as_key() {
                 loop {
                     self.skip_whitespace(); // skip '"'
-                    let new = self.string_unchecked2();
+                    let matches = self.string_match_unchecked(key);
                     self.skip_whitespace(); // skip ':'
                     char = self.skip_whitespace();
 
-                    if &*new == key {
+                    if matches {
                         continue 'main;
                     }
 
@@ -380,99 +336,44 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
         char
     }
 
-    /// This function is used for matching against object key when using
-    /// `parse_at_unchecked` and materializing lazy value.
-    /// Validation is not required.
-    pub(crate) unsafe fn string_unchecked2(&mut self) -> String<'a> {
-        let mut offset = self.idx() + 1;
-        let mut buf = dangling_mut();
-        let mut cap = 0;
-        let mut len = 0;
+    unsafe fn string_match_unchecked(&mut self, target: &str) -> bool {
+        let (mut start, end) = if target.is_empty() {
+            (&raw const INVALID[1], &raw const INVALID[1])
+        } else {
+            (target.as_ptr(), target.as_ptr().add(target.len()))
+        };
 
         loop {
-            if self.simd_str_unchecked() {
-                continue;
-            }
-
             self.inc(1);
             match self.cur() {
-                b'"' => break,
+                b'"' => return start == end,
                 b'\\' => {
-                    let count = self.idx() - offset;
-                    let new_len = len + count + 4;
-
-                    if cap < new_len {
-                        let tmp = new_len * 5 / 4;
-                        let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-
-                        buf = if cap != 0 {
-                            realloc(
-                                buf,
-                                Layout::array::<u8>(cap).unwrap_unchecked(),
-                                layout.size(),
-                            )
-                        } else {
-                            alloc(layout)
-                        };
-                        cap = tmp;
-                    }
-
-                    buf.add(len)
-                        .copy_from_nonoverlapping(self.src.ptr(offset), count);
                     self.inc(1);
-
-                    len += count;
-                    offset = self.idx() + 1;
-
-                    let tmp = self.cur();
-                    let buf = buf.add(len);
-                    let esc = ESC_LUT[tmp as usize];
+                    let esc = ESC_LUT[self.cur() as usize];
 
                     if esc != 0 {
-                        buf.write(esc);
-                        len += 1;
+                        start = match start != end && *start == esc {
+                            true => start.add(1),
+                            _ => &raw const INVALID[0],
+                        };
                         continue;
                     }
 
-                    let tmp = &mut [0; 4];
-                    let esc = self.unicode_escape(tmp).unwrap_unchecked();
+                    let mut tmp = [0; 4];
+                    let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
 
-                    buf.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
-                    offset = self.idx() + 1;
-                    len += esc.len();
-                    continue;
+                    for &v in esc {
+                        start = match start != end && *start == v {
+                            true => start.add(1),
+                            _ => &raw const INVALID[0],
+                        }
+                    }
                 }
-                _ => continue,
-            };
+                v => match start != end && *start == v {
+                    true => start = start.add(1),
+                    _ => start = &raw const INVALID[0],
+                },
+            }
         }
-
-        if !S::Volatility::IS_VOLATILE && len == 0 {
-            return String::from(from_utf8_unchecked(from_raw_parts(
-                self.src.ptr(offset),
-                self.idx() - offset,
-            )));
-        }
-
-        let count = self.idx() - offset;
-        let new_len = len + count;
-
-        if cap < new_len {
-            let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
-
-            buf = if !(S::Volatility::IS_VOLATILE && cap == 0) {
-                realloc(
-                    buf,
-                    Layout::array::<u8>(cap).unwrap_unchecked(),
-                    layout.size(),
-                )
-            } else {
-                alloc(layout)
-            };
-            cap = new_len;
-        }
-
-        buf.add(len)
-            .copy_from_nonoverlapping(self.src.ptr(offset), count);
-        String::from_raw_parts(buf, new_len, cap)
     }
 }

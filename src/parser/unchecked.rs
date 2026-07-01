@@ -80,7 +80,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
     }
 
-    pub(super) unsafe fn string_unchecked<T, V, E>(&mut self) -> T
+    pub(crate) unsafe fn string_unchecked<T, V, E>(&mut self) -> T
     where
         V: StringBuilder<'a, S, E> + Into<T>,
         E: ErrorBuilder,

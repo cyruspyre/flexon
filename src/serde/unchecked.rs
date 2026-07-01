@@ -4,16 +4,10 @@ use crate::{
     misc::{ESC_LUT, NUM_LUT},
     source::{Source, Volatility},
 };
-use alloc::{
-    alloc::{alloc, realloc},
-    string::String,
-};
 use core::{
-    alloc::Layout,
     fmt::{self, Debug, Display, Formatter},
     hint::unreachable_unchecked,
     ops::{Deref, DerefMut},
-    ptr::dangling_mut,
     slice::from_raw_parts,
     str::from_utf8_unchecked,
 };
@@ -21,6 +15,15 @@ use serde_core::{
     Deserialize, Deserializer,
     de::{self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor},
     forward_to_deserialize_any,
+};
+
+#[cfg(feature = "alloc")]
+use {
+    alloc::{
+        alloc::{alloc, realloc},
+        string::String,
+    },
+    core::{alloc::Layout, ptr::dangling_mut},
 };
 
 #[cfg(feature = "span")]
@@ -128,129 +131,131 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Unchecked<'_, 'de, S,
             self.src.trim(tmp);
         }
 
-        if S::INSITU {
-            let start = unsafe { self.cur_ptr_mut().add(1) };
-            let mut offset = start;
-            let mut len = 0;
+        match S::INSITU {
+            true => unsafe {
+                let start = self.cur_ptr_mut().add(1);
+                let mut offset = start;
+                let mut len = 0;
 
-            loop {
-                if self.simd_str_unchecked() {
-                    continue;
-                }
+                loop {
+                    if self.simd_str_unchecked() {
+                        continue;
+                    }
 
-                self.inc(1);
-                break match self.cur() {
-                    b'"' => unsafe {
-                        let count = self.cur_ptr().offset_from_unsigned(offset);
-                        if len != 0 {
+                    self.inc(1);
+                    break match self.cur() {
+                        b'"' => {
+                            let count = self.cur_ptr().offset_from_unsigned(offset);
+                            if len != 0 {
+                                start.add(len).copy_from(offset, count);
+                            }
+
+                            len += count;
+                            let tmp = from_raw_parts(start, len);
+                            visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
+                        }
+                        b'\\' => {
+                            let count = self.cur_ptr().offset_from_unsigned(offset);
+
                             start.add(len).copy_from(offset, count);
-                        }
+                            self.inc(1);
 
-                        len += count;
-                        let tmp = from_raw_parts(start, len);
-                        visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
-                    },
-                    b'\\' => unsafe {
-                        let count = self.cur_ptr().offset_from_unsigned(offset);
+                            len += count;
+                            offset = self.cur_ptr_mut().add(1);
 
-                        start.add(len).copy_from(offset, count);
-                        self.inc(1);
+                            let ptr = start.add(len);
+                            let tmp = self.cur();
+                            let esc = ESC_LUT[tmp as usize];
 
-                        len += count;
-                        offset = self.cur_ptr_mut().add(1);
+                            if esc != 0 {
+                                ptr.write(esc);
+                                len += 1;
+                                continue;
+                            }
 
-                        let ptr = start.add(len);
-                        let tmp = self.cur();
-                        let esc = ESC_LUT[tmp as usize];
+                            let mut tmp = [0; 4];
+                            let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
 
-                        if esc != 0 {
-                            ptr.write(esc);
-                            len += 1;
+                            ptr.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
+                            offset = self.cur_ptr_mut().add(1);
+                            len += esc.len();
                             continue;
                         }
+                        _ => continue,
+                    };
+                }
+            },
+            #[cfg(feature = "alloc")]
+            _ if S::Volatility::IS_VOLATILE => unsafe {
+                let mut offset = self.idx() + 1;
+                let mut buf = dangling_mut();
+                let mut cap = 0;
+                let mut len = 0;
 
-                        let mut tmp = [0; 4];
-                        let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
-
-                        ptr.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
-                        offset = self.cur_ptr_mut().add(1);
-                        len += esc.len();
+                loop {
+                    if self.simd_str_unchecked() {
                         continue;
-                    },
-                    _ => continue,
-                };
-            }
-        } else if S::Volatility::IS_VOLATILE {
-            let mut offset = self.idx() + 1;
-            let mut buf = dangling_mut();
-            let mut cap = 0;
-            let mut len = 0;
+                    }
 
-            loop {
-                if self.simd_str_unchecked() {
-                    continue;
+                    self.inc(1);
+                    match self.cur() {
+                        b'"' => break,
+                        b'\\' => {
+                            let count = self.idx() - offset;
+                            let new_len = len + count + 4;
+
+                            if cap < new_len {
+                                let tmp = new_len + new_len / 4;
+                                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
+
+                                buf = if cap != 0 {
+                                    realloc(
+                                        buf,
+                                        Layout::array::<u8>(cap).unwrap_unchecked(),
+                                        layout.size(),
+                                    )
+                                } else {
+                                    alloc(layout)
+                                };
+                                cap = tmp;
+                            }
+
+                            buf.add(len)
+                                .copy_from_nonoverlapping(self.src.ptr(offset), count);
+                            self.inc(1);
+
+                            len += count;
+                            offset = self.idx() + 1;
+
+                            let tmp = self.cur();
+                            let buf = buf.add(len);
+                            let esc = ESC_LUT[tmp as usize];
+
+                            if esc != 0 {
+                                buf.write(esc);
+                                len += 1;
+                                continue;
+                            }
+
+                            let mut tmp = [0; 4];
+                            let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
+
+                            buf.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
+                            offset = self.idx() + 1;
+                            len += esc.len();
+                            continue;
+                        }
+                        _ => continue,
+                    };
                 }
 
-                self.inc(1);
-                match self.cur() {
-                    b'"' => break,
-                    b'\\' => unsafe {
-                        let count = self.idx() - offset;
-                        let new_len = len + count + 4;
+                let count = self.idx() - offset;
+                let new_len = len + count;
 
-                        if cap < new_len {
-                            let tmp = new_len + new_len / 4;
-                            let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-
-                            buf = if cap != 0 {
-                                realloc(
-                                    buf,
-                                    Layout::array::<u8>(cap).unwrap_unchecked(),
-                                    layout.size(),
-                                )
-                            } else {
-                                alloc(layout)
-                            };
-                            cap = tmp;
-                        }
-
-                        buf.add(len)
-                            .copy_from_nonoverlapping(self.src.ptr(offset), count);
-                        self.inc(1);
-
-                        len += count;
-                        offset = self.idx() + 1;
-
-                        let tmp = self.cur();
-                        let buf = buf.add(len);
-                        let esc = ESC_LUT[tmp as usize];
-
-                        if esc != 0 {
-                            buf.write(esc);
-                            len += 1;
-                            continue;
-                        }
-
-                        let mut tmp = [0; 4];
-                        let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
-
-                        buf.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
-                        offset = self.idx() + 1;
-                        len += esc.len();
-                        continue;
-                    },
-                    _ => continue,
-                };
-            }
-
-            let count = self.idx() - offset;
-            let new_len = len + count;
-
-            if cap < new_len {
-                buf = unsafe {
+                if cap < new_len {
                     let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
 
-                    if cap == 0 {
+                    buf = if cap == 0 {
                         alloc(layout)
                     } else {
                         realloc(
@@ -258,104 +263,110 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Unchecked<'_, 'de, S,
                             Layout::array::<u8>(cap).unwrap_unchecked(),
                             layout.size(),
                         )
-                    }
-                };
-                cap = new_len;
-            }
+                    };
+                    cap = new_len;
+                }
 
-            unsafe {
                 buf.add(len)
                     .copy_from_nonoverlapping(self.src.ptr(offset), count);
                 visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
-            }
-        } else {
-            let mut offset = unsafe { self.cur_ptr().add(1) };
-            let mut buf = dangling_mut();
-            let mut cap = 0;
-            let mut len = 0;
+            },
+            #[cfg(feature = "alloc")]
+            _ => unsafe {
+                let mut offset = self.cur_ptr().add(1);
+                let mut buf = dangling_mut();
+                let mut cap = 0;
+                let mut len = 0;
 
-            loop {
-                if self.simd_str_unchecked() {
-                    continue;
+                loop {
+                    if self.simd_str_unchecked() {
+                        continue;
+                    }
+
+                    self.inc(1);
+                    match self.cur() {
+                        b'"' => break,
+                        b'\\' => {
+                            let count = self.cur_ptr().offset_from_unsigned(offset);
+                            let new_len = len + count + 4;
+
+                            if cap < new_len {
+                                let tmp = new_len + new_len / 4;
+                                let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
+
+                                buf = if cap != 0 {
+                                    realloc(
+                                        buf,
+                                        Layout::array::<u8>(cap).unwrap_unchecked(),
+                                        layout.size(),
+                                    )
+                                } else {
+                                    alloc(layout)
+                                };
+                                cap = tmp;
+                            }
+
+                            buf.add(len).copy_from_nonoverlapping(offset, count);
+                            self.inc(1);
+
+                            len += count;
+                            offset = self.cur_ptr().add(1);
+
+                            let tmp = self.cur();
+                            let buf = buf.add(len);
+                            let esc = ESC_LUT[tmp as usize];
+
+                            if esc != 0 {
+                                buf.write(esc);
+                                len += 1;
+                                continue;
+                            }
+
+                            let mut tmp = [0; 4];
+                            let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
+
+                            buf.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
+                            offset = self.cur_ptr().add(1);
+                            len += esc.len();
+                        }
+                        _ => {}
+                    }
                 }
 
-                self.inc(1);
-                match self.cur() {
-                    b'"' => break,
-                    b'\\' => unsafe {
-                        let count = self.cur_ptr().offset_from_unsigned(offset);
-                        let new_len = len + count + 4;
-
-                        if cap < new_len {
-                            let tmp = new_len + new_len / 4;
-                            let layout = Layout::array::<u8>(tmp).unwrap_unchecked();
-
-                            buf = if cap != 0 {
-                                realloc(
-                                    buf,
-                                    Layout::array::<u8>(cap).unwrap_unchecked(),
-                                    layout.size(),
-                                )
-                            } else {
-                                alloc(layout)
-                            };
-                            cap = tmp;
-                        }
-
-                        buf.add(len).copy_from_nonoverlapping(offset, count);
-                        self.inc(1);
-
-                        len += count;
-                        offset = self.cur_ptr().add(1);
-
-                        let tmp = self.cur();
-                        let buf = buf.add(len);
-                        let esc = ESC_LUT[tmp as usize];
-
-                        if esc != 0 {
-                            buf.write(esc);
-                            len += 1;
-                            continue;
-                        }
-
-                        let mut tmp = [0; 4];
-                        let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
-
-                        buf.copy_from_nonoverlapping(esc.as_ptr(), esc.len());
-                        offset = self.cur_ptr().add(1);
-                        len += esc.len();
-                    },
-                    _ => {}
-                }
-            }
-
-            if len == 0 {
-                return unsafe {
-                    visitor.visit_borrowed_str(from_utf8_unchecked(from_raw_parts(
+                if len == 0 {
+                    return visitor.visit_borrowed_str(from_utf8_unchecked(from_raw_parts(
                         offset,
                         self.cur_ptr().offset_from_unsigned(offset),
-                    )))
-                };
-            }
+                    )));
+                }
 
-            let count = unsafe { self.cur_ptr().offset_from_unsigned(offset) };
-            let new_len = len + count;
+                let count = self.cur_ptr().offset_from_unsigned(offset);
+                let new_len = len + count;
 
-            if cap < new_len {
-                buf = unsafe {
-                    realloc(
+                if cap < new_len {
+                    buf = realloc(
                         buf,
                         Layout::array::<u8>(cap).unwrap_unchecked(),
                         Layout::array::<u8>(new_len).unwrap_unchecked().size(),
-                    )
-                };
-                cap = new_len;
-            }
+                    );
+                    cap = new_len;
+                }
 
-            unsafe {
                 buf.add(len).copy_from_nonoverlapping(offset, count);
                 visitor.visit_string(String::from_raw_parts(buf, new_len, cap))
-            }
+            },
+            #[cfg(not(feature = "alloc"))]
+            _ => unsafe {
+                const {
+                    assert!(
+                        S::INSITU,
+                        "string parsing involved, in-situ apis needed without `alloc`"
+                    )
+                }
+
+                // for the plot
+                core::hint::unreachable_unchecked()
+            },
         }
     }
 

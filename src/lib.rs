@@ -15,28 +15,25 @@ mod misc;
 mod parser;
 mod simd;
 pub mod source;
+mod utf8;
 pub mod value;
 
 #[cfg(feature = "comment")]
 mod comment;
-#[cfg(feature = "alloc")]
 pub mod pointer;
 #[cfg(feature = "serde")]
 pub mod serde;
 #[cfg(feature = "span")]
 pub mod span;
 
-use crate::{source::Source, value::builder::ValueBuilder};
+use crate::{pointer::JsonPointer, source::Source, value::builder::ValueBuilder};
 
 #[doc(inline)]
 pub use {error::Error, parser::Parser};
 
 #[doc(inline)]
 #[cfg(feature = "alloc")]
-pub use {
-    pointer::JsonPointer,
-    value::{LazyValue, OwnedValue, Value},
-};
+pub use value::{LazyValue, OwnedValue, Value};
 
 #[doc(inline)]
 #[cfg(feature = "serde")]
@@ -91,7 +88,6 @@ pub fn parse<'a, S: Source + 'a, V: ValueBuilder<'a, S>>(s: S) -> Result<V, V::E
 /// # Ok::<(), flexon::Error>(())
 /// ```
 #[inline]
-#[cfg(feature = "alloc")]
 pub fn parse_at<'a, S, V, P>(s: S, p: P) -> Result<V, V::Error>
 where
     S: Source + 'a,
