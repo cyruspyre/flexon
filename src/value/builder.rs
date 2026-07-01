@@ -124,10 +124,16 @@ pub trait StringBuilder<'a, S: Source, E: ErrorBuilder> {
     /// Called before calling [`Self::on_escape`].
     ///
     /// This is the byte slice before escape sequence excluding `'\'` at the end.
-    fn on_chunk(&mut self, s: &'a [u8]);
+    ///
+    /// # Safety
+    /// The caller must ensure this instance was created via [`Self::new`].
+    unsafe fn on_chunk(&mut self, s: &'a [u8]);
 
     /// Called at the final remaining byte slice.
-    fn on_final_chunk(&mut self, s: &'a [u8]);
+    ///
+    /// # Safety
+    /// The caller must ensure this instance was created via [`Self::new`].
+    unsafe fn on_final_chunk(&mut self, s: &'a [u8]);
 
     /// Applies span information. The given offsets will be byte offsets.
     fn apply_span(&mut self, start: usize, end: usize);

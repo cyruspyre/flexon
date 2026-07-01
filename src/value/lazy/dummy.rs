@@ -63,10 +63,10 @@ impl<S: Source> StringBuilder<'_, S, Error> for _String {
     unsafe fn on_escape(&mut self, _: &[u8]) {}
 
     #[inline]
-    fn on_chunk(&mut self, _: &[u8]) {}
+    unsafe fn on_chunk(&mut self, _: &[u8]) {}
 
     #[inline]
-    fn on_final_chunk(&mut self, _: &[u8]) {}
+    unsafe fn on_final_chunk(&mut self, _: &[u8]) {}
 
     #[inline]
     fn apply_span(&mut self, _: usize, _: usize) {}

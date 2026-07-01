@@ -58,95 +58,89 @@ where
 
     #[inline]
     unsafe fn on_escape(&mut self, s: &[u8]) {
-        unsafe {
-            match &mut self.0 {
-                Inner::Heap { buf, len, .. } => {
-                    buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len());
-                    *len += s.len();
-                }
-                _ => unreachable_unchecked(),
+        match &mut self.0 {
+            Inner::Heap { buf, len, .. } => {
+                buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len());
+                *len += s.len();
             }
+            _ => unreachable_unchecked(),
         }
     }
 
     #[inline]
-    fn on_chunk(&mut self, s: &[u8]) {
+    unsafe fn on_chunk(&mut self, s: &[u8]) {
         let Inner::Heap { buf, len, cap } = &mut self.0 else {
-            unsafe { unreachable_unchecked() }
+            unreachable_unchecked()
         };
         let mut new_len = *len + s.len() + 4;
 
         if *cap < new_len {
             new_len += new_len / 4;
-            *buf = unsafe {
-                let Ok(layout) = Layout::array::<u8>(new_len) else {
-                    capacity_overflow()
-                };
-                let buf = if *cap != 0 {
-                    realloc(
-                        *buf,
-                        Layout::array::<u8>(*cap).unwrap_unchecked(),
-                        layout.size(),
-                    )
-                } else {
-                    alloc(layout)
-                };
-
-                if buf.is_null() {
-                    handle_alloc_error(layout)
-                }
-                buf
+            let Ok(layout) = Layout::array::<u8>(new_len) else {
+                capacity_overflow()
             };
+            let new_buf = if *cap != 0 {
+                realloc(
+                    *buf,
+                    Layout::array::<u8>(*cap).unwrap_unchecked(),
+                    layout.size(),
+                )
+            } else {
+                alloc(layout)
+            };
+
+            if new_buf.is_null() {
+                handle_alloc_error(layout)
+            }
+
+            *buf = new_buf;
             *cap = new_len;
         }
 
-        unsafe { buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len()) }
+        buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len());
         *len += s.len()
     }
 
     #[inline]
-    fn on_final_chunk(&mut self, s: &[u8]) {
+    unsafe fn on_final_chunk(&mut self, s: &[u8]) {
         let Inner::Heap { buf, len, cap } = &mut self.0 else {
-            unsafe { unreachable_unchecked() }
+            unreachable_unchecked()
         };
 
         if likely(*len == 0 && s.len() <= 30) {
-            return unsafe {
-                let mut buf = [0; 30];
-                buf.as_mut_ptr()
-                    .copy_from_nonoverlapping(s.as_ptr(), s.len());
+            let mut buf = [0; 30];
 
-                self.0 = Inner::Stack {
-                    buf,
-                    len: s.len() as _,
-                }
+            buf.as_mut_ptr()
+                .copy_from_nonoverlapping(s.as_ptr(), s.len());
+            return self.0 = Inner::Stack {
+                buf,
+                len: s.len() as _,
             };
         }
 
         let new_len = *len + s.len();
 
         if *cap < new_len {
-            *buf = unsafe {
-                let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
-                let buf = if *cap != 0 {
-                    realloc(
-                        *buf,
-                        Layout::array::<u8>(*cap).unwrap_unchecked(),
-                        layout.size(),
-                    )
-                } else {
-                    alloc(layout)
-                };
-
-                if buf.is_null() {
-                    handle_alloc_error(layout)
-                }
-                buf
+            let layout = Layout::array::<u8>(new_len).unwrap_unchecked();
+            let new_buf = if *cap != 0 {
+                realloc(
+                    *buf,
+                    Layout::array::<u8>(*cap).unwrap_unchecked(),
+                    layout.size(),
+                )
+            } else {
+                alloc(layout)
             };
+
+            if new_buf.is_null() {
+                handle_alloc_error(layout)
+            }
+
+            *buf = new_buf;
             *cap = new_len;
         }
 
-        unsafe { buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len()) }
+        buf.add(*len).copy_from_nonoverlapping(s.as_ptr(), s.len());
         *len = new_len
     }
 
