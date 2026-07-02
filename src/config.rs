@@ -110,7 +110,7 @@ impl<const A: bool, const B: bool> CTConfig<A, B> {
 }
 
 #[cfg(feature = "comment")]
-// #[doc(cfg(all(not(feature = "comment"), feature = "comment")))]
+#[cfg_attr(docsrs, doc(cfg(all())))]
 mod __ {
     use super::{CTConfig, Config, Sealed};
 
