@@ -1,12 +1,12 @@
 [package]
 name = "flexon"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2024"
 description = "SIMD accelerated JSON parser"
 repository = "https://github.com/cyruspyre/flexon"
 license = "MIT"
 exclude = ["benchmark/", ".gitignore"]
-categories = ["encoding", "parser-implementations"]
+categories = ["encoding", "parser-implementations", "no-std", "no-std::no-alloc"]
 keywords = ["simd", "json", "parser", "span", "comment"]
 
 [package.metadata.docs.rs]
