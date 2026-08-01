@@ -113,7 +113,8 @@ impl Source for &str {
 
     #[inline(always)]
     fn ptr(&mut self, offset: usize) -> *const u8 {
-        unsafe { self.as_ptr().add(offset) }
+        // refer to `str_sse2`
+        self.as_ptr().wrapping_add(offset)
     }
 
     #[inline(always)]
