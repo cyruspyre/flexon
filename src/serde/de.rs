@@ -4,8 +4,7 @@ use crate::{
     JsonPointer, Parser,
     config::Config,
     misc::{ESC_LUT, NUM_LUT, unlikely},
-    serde::unchecked::Unchecked,
-    source::{NonVolatile, Source, Volatility},
+    source::{Source, Volatility},
 };
 use core::{
     fmt::{self, Display, Formatter},
@@ -31,7 +30,7 @@ use {
 };
 
 #[cfg(feature = "std")]
-use std::io::Read;
+use {serde_core::de::DeserializeOwned, std::io::Read};
 
 #[cfg(feature = "span")]
 use super::span::*;
@@ -41,26 +40,28 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl<S: Source, C: Config> Parser<'_, S, C> {
     fn skip_whitespace_alt(&mut self) -> u8 {
         loop {
-            if match S::NULL_PADDED {
-                true => unsafe { *self.cur_ptr().add(1) == 0 },
-                _ => self.idx().wrapping_add(1) >= self.src.len(),
-            } {
+            if !S::NULL_PADDED && self.idx() >= self.src.len() {
                 return 0;
             }
 
-            self.inc(1);
             let tmp = self.cur();
-
             if !matches!(tmp, b' ' | b'\t' | b'\n' | b'\r') {
+                #[cfg(feature = "comment")]
+                if tmp == b'/' && self.cfg.comments() && self.parse_comment() {
+                    continue;
+                }
+
                 return tmp;
             }
+
+            self.inc(1);
         }
     }
 
     #[allow(unused_mut)]
-    unsafe fn parse_literal<'a, V: Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value> {
+    unsafe fn parse_literal_serde<'a, V: Visitor<'a>>(&mut self, visitor: V) -> Result<V::Value> {
         if S::Volatility::IS_VOLATILE {
-            let tmp = self.idx().wrapping_add(1);
+            let tmp = self.idx();
             self.src.trim(tmp);
         }
 
@@ -95,7 +96,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
             'int: {
                 if is_int {
-                    self.dec();
+                    self.dec(1);
                     return if neg {
                         if val > 9223372036854775808 {
                             break 'int;
@@ -129,8 +130,8 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             return Err(tmp);
         }
 
-        let tmp = match S::NULL_PADDED || self.idx().wrapping_add(3) < self.src.len() {
-            true => 'tmp: {
+        if S::NULL_PADDED || self.idx() + 3 < self.src.len() {
+            'tmp: {
                 self.inc(3);
                 return match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
                     0x6c6c756e => visitor.visit_unit(),
@@ -142,20 +143,15 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                         self.inc(1);
                         visitor.visit_bool(false)
                     }
-                    _ => break 'tmp Kind::InvalidLiteral,
+                    _ => break 'tmp,
                 };
             }
-            false => Kind::InvalidLiteral,
-        };
-        let mut tmp = self.err(tmp);
+        }
+
+        let mut tmp = self.err(Kind::InvalidLiteral);
 
         #[cfg(feature = "span")]
-        {
-            tmp.span[0] = stamp;
-            // skips non whitespace chars with bounds checking.
-            self.skip_literal_unchecked();
-            tmp.span[1] = self.idx();
-        }
+        tmp.span.fill(stamp);
 
         Err(tmp)
     }
@@ -177,7 +173,7 @@ macro_rules! deserialize_literal {
     ($($name:ident),* $(,)?) => {
         $(
             fn $name<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-                unsafe { self.parse_literal(visitor) }
+                unsafe { self.parse_literal_serde(visitor) }
             }
         )*
     }
@@ -187,15 +183,34 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let tmp = self.skip_whitespace();
-        self.dec();
-
-        match tmp {
+        match self.skip_whitespace() {
             b'"' => self.deserialize_str(visitor),
-            b'{' => self.deserialize_map(visitor),
-            b'[' if self.idx().wrapping_add(2) < self.src.len() => self.deserialize_seq(visitor),
+            b'{' => {
+                if S::Volatility::IS_VOLATILE {
+                    let tmp = self.idx();
+                    self.src.trim(tmp);
+                }
+
+                visitor.visit_map(CommaSeparated::new(self))
+            }
+            b'[' => {
+                if S::Volatility::IS_VOLATILE {
+                    let tmp = self.idx();
+                    self.src.trim(tmp);
+                }
+
+                let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
+                self.inc(1);
+                let tmp = match self.skip_whitespace_alt() {
+                    b']' => return Ok(tmp),
+                    0 => Kind::Eof,
+                    _ => Kind::UnexpectedToken,
+                };
+
+                Err(self.err(tmp))
+            }
             0 => Err(self.err(Kind::Eof)),
-            _ => unsafe { self.parse_literal(visitor) },
+            _ => unsafe { self.parse_literal_serde(visitor) },
         }
     }
 
@@ -269,7 +284,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             }
 
                             if tmp == b'u'
-                                && let Some(v) = self.unicode_escape(&mut [0; 4])
+                                && let Some(v) = self.parse_unicode_escape(&mut [0; 4])
                             {
                                 ptr.copy_from_nonoverlapping(v.as_ptr(), v.len());
                                 offset = self.cur_ptr_mut().add(1);
@@ -292,10 +307,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 let mut err = self.err(err);
 
                 #[cfg(feature = "span")]
-                {
-                    // exclude quote
-                    err.span[0] = start.offset_from_unsigned(self.src.ptr(0)) - 1
-                }
+                (err.span[0] = start.offset_from_unsigned(self.src.ptr(0)) - 1); // `- 1` to exclude quote
 
                 Err(err)
             },
@@ -369,7 +381,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                                 }
 
                                 if tmp == b'u'
-                                    && let Some(v) = self.unicode_escape(&mut [0; 4])
+                                    && let Some(v) = self.parse_unicode_escape(&mut [0; 4])
                                 {
                                     buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
                                     offset = self.idx() + 1;
@@ -383,8 +395,8 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             _ => Kind::ControlCharacter,
                         };
                     };
-                    let err = self.close_string(err);
-                    let mut err = self.err(err);
+                    let kind = self.close_string(err);
+                    let mut err = self.err(kind);
 
                     #[cfg(feature = "span")]
                     (err.span[0] = start);
@@ -502,7 +514,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                                 }
 
                                 if tmp == b'u'
-                                    && let Some(v) = self.unicode_escape(&mut [0; 4])
+                                    && let Some(v) = self.parse_unicode_escape(&mut [0; 4])
                                 {
                                     buf.copy_from_nonoverlapping(v.as_ptr(), v.len());
                                     offset = self.cur_ptr().add(1);
@@ -603,7 +615,6 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             return visitor.visit_none();
         }
 
-        self.dec();
         visitor.visit_some(self)
     }
 
@@ -629,14 +640,14 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         if S::Volatility::IS_VOLATILE {
-            let tmp = self.idx().wrapping_add(1);
+            let tmp = self.idx();
             self.src.trim(tmp);
         }
 
         let tmp = match self.skip_whitespace() {
             b'[' => {
                 let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
-
+                self.inc(1);
                 match self.skip_whitespace_alt() {
                     b']' => return Ok(tmp),
                     0 => Kind::Eof,
@@ -665,9 +676,10 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         if S::Volatility::IS_VOLATILE {
-            let tmp = self.idx().wrapping_add(1);
+            let tmp = self.idx();
             self.src.trim(tmp);
         }
+
         let tmp = match self.skip_whitespace() {
             b'{' => return visitor.visit_map(CommaSeparated::new(self)),
             0 => Kind::Eof,
@@ -687,7 +699,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             b'{' => return visitor.visit_map(CommaSeparated::new(self)),
             b'[' => {
                 let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
-
+                self.inc(1);
                 match self.skip_whitespace_alt() {
                     b']' => return Ok(tmp),
                     0 => Kind::Eof,
@@ -711,6 +723,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
             b'{' => {
                 let tmp = visitor.visit_enum(VariantAccess(self))?;
 
+                self.inc(1);
                 match self.skip_whitespace() {
                     b'}' => return Ok(tmp),
                     0 => Kind::Eof,
@@ -774,51 +787,65 @@ impl<'a, 'de, S: Source, C: Config> MapAccess<'de> for CommaSeparated<'a, 'de, S
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
-        let mut wtf = true;
+        let mut comma = cfg_select! {
+            feature = "span" => usize::MAX,
+            _ => false,
+        };
 
         loop {
-            let tmp = self.de.skip_whitespace();
-            let err = match tmp {
+            self.de.inc(1);
+            let kind = match self.de.skip_whitespace() {
                 b'"' if self.flag => {
-                    self.de.dec();
                     self.flag = false;
                     return seed.deserialize(&mut *self.de).map(Some);
                 }
                 b',' => {
                     if !self.flag {
                         self.flag = true;
-                        wtf = false;
+                        comma = cfg_select! {
+                            feature = "span" => self.de.idx(),
+                            _ => true,
+                        };
                         continue;
                     }
 
                     Kind::UnexpectedToken
                 }
-                b'}' => match wtf || self.de.cfg.trailing_comma() {
+                b'}' => match cfg_select! {
+                    feature = "span" => comma == usize::MAX,
+                    _ => !comma,
+                } || self.de.cfg.trailing_comma()
+                {
                     true => return Ok(None),
-                    _ => {
-                        #[cfg(feature = "span")]
-                        self.de.dec();
-                        Kind::TrailingComma
-                    }
+                    _ => Kind::TrailingComma,
                 },
                 0 => Kind::Eof,
                 _ if self.de.cfg.comma() => {
                     self.flag = true;
-                    self.de.dec();
+                    self.de.dec(1);
                     continue;
                 }
                 _ => Kind::UnexpectedToken,
             };
+            #[allow(unused_mut)]
+            let mut err = self.de.err(kind);
 
-            return Err(self.de.err(err));
+            #[cfg(feature = "span")]
+            if comma != usize::MAX {
+                err.span.fill(comma)
+            }
+
+            return Err(err);
         }
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
+        self.de.inc(1);
         if self.de.skip_whitespace() != b':' {
             return Err(self.de.err(Kind::ExpectedColon));
         }
 
+        self.de.inc(1);
         seed.deserialize(&mut *self.de)
     }
 }
@@ -827,41 +854,54 @@ impl<'a, 'de, S: Source, C: Config> SeqAccess<'de> for CommaSeparated<'a, 'de, S
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
-        let mut wtf = true;
+        let mut comma = cfg_select! {
+            feature = "span" => usize::MAX,
+            _ => false,
+        };
 
         loop {
-            let err = match self.de.skip_whitespace() {
-                b']' => match wtf || self.de.cfg.trailing_comma() {
+            self.de.inc(1);
+            let kind = match self.de.skip_whitespace() {
+                b']' => match cfg_select! {
+                    feature = "span" => comma == usize::MAX,
+                    _ => !comma,
+                } || self.de.cfg.trailing_comma()
+                {
                     true => {
-                        self.de.dec();
+                        self.de.dec(1);
                         return Ok(None);
                     }
-                    _ => {
-                        #[cfg(feature = "span")]
-                        self.de.dec();
-                        Kind::TrailingComma
-                    }
+                    _ => Kind::TrailingComma,
                 },
                 _ if self.flag => {
-                    self.de.dec();
                     self.flag = false;
                     return seed.deserialize(&mut *self.de).map(Some);
                 }
                 b',' if !self.flag => {
                     self.flag = true;
-                    wtf = false;
+                    comma = cfg_select! {
+                        feature = "span" => self.de.idx(),
+                        _ => true,
+                    };
                     continue;
                 }
                 0 => Kind::Eof,
                 _ if self.de.cfg.comma() => {
                     self.flag = true;
-                    self.de.dec();
+                    self.de.dec(1);
                     continue;
                 }
                 _ => Kind::UnexpectedToken,
             };
+            #[allow(unused_mut)]
+            let mut err = self.de.err(kind);
 
-            return Err(self.de.err(err));
+            #[cfg(feature = "span")]
+            if comma != usize::MAX {
+                err.span.fill(comma)
+            }
+
+            return Err(err);
         }
     }
 }
@@ -873,12 +913,16 @@ impl<'a, 'de, S: Source, C: Config> EnumAccess<'de> for VariantAccess<'a, 'de, S
     type Variant = Self;
 
     fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self::Variant)> {
+        self.0.inc(1);
         let tmp = seed.deserialize(&mut *self.0)?;
 
-        if self.0.skip_whitespace() == b':' {
-            Ok((tmp, self))
-        } else {
-            Err(self.0.err(Kind::ExpectedColon))
+        self.0.inc(1);
+        match self.0.skip_whitespace() {
+            b':' => {
+                self.0.inc(1);
+                Ok((tmp, self))
+            }
+            _ => Err(self.0.err(Kind::ExpectedColon)),
         }
     }
 }
@@ -914,7 +958,6 @@ impl<'a, 'de, S: Source, C: Config> EnumAccess<'de> for UnitVariantAccess<'a, 'd
     type Variant = Self;
 
     fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self)> {
-        self.0.dec();
         Ok((seed.deserialize(&mut *self.0)?, self))
     }
 }
@@ -1059,7 +1102,7 @@ impl de::Error for Error {
 impl core::error::Error for Error {}
 
 #[allow(non_local_definitions)]
-const _: fn() = || {
+const _: () = {
     use crate::value::builder::ErrorBuilder;
 
     #[doc(hidden)]
@@ -1333,11 +1376,7 @@ pub fn from_mut_null_padded<'a, T: Deserialize<'a>>(buf: &'a mut NullPadded) -> 
 /// ```
 #[inline]
 #[cfg(feature = "std")]
-pub fn from_reader<R, T>(r: R) -> Result<T>
-where
-    R: Read,
-    T: de::DeserializeOwned,
-{
+pub fn from_reader<T: DeserializeOwned>(r: impl Read) -> Result<T> {
     T::deserialize(&mut Parser::from_reader(r))
 }
 
@@ -1346,11 +1385,7 @@ where
 /// Same as [`from_reader`] but will not perform UTF-8 validation.
 #[inline]
 #[cfg(feature = "std")]
-pub unsafe fn from_reader_unchecked<R, T>(r: R) -> Result<T>
-where
-    R: Read,
-    T: de::DeserializeOwned,
-{
+pub unsafe fn from_reader_unchecked<T: DeserializeOwned>(r: impl Read) -> Result<T> {
     T::deserialize(&mut Parser::from_reader_unchecked(r))
 }
 
@@ -1370,37 +1405,16 @@ where
 ///
 /// assert_eq!(val, 2);
 /// ```
-pub fn get_with_parser<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> Result<T>
+pub fn get_with_parser<'a, T, P>(
+    path: P,
+    parser: &mut Parser<'a, impl Source + 'a, impl Config>,
+) -> Result<T>
 where
-    S: Source + 'a,
-    C: Config,
     T: Deserialize<'a>,
-    P: IntoIterator,
-    P::Item: JsonPointer,
+    P: IntoIterator<Item: JsonPointer>,
 {
     parser._skip_to(path)?;
-    parser.dec_if_not_empty();
     T::deserialize(parser)
-}
-
-/// Skips to the given path and deserializes the type using the provided parser.
-///
-/// This function's behavior is undefined if any of the following conditions are not met:
-///
-/// - The JSON must be valid.
-/// - The path must exist.
-/// - The specified type must be deserializable from the provided JSON data.
-pub unsafe fn get_with_parser_unchecked<'a, S, C, T, P>(path: P, parser: &mut Parser<'a, S, C>) -> T
-where
-    S: Source<Volatility = NonVolatile> + 'a,
-    C: Config,
-    T: Deserialize<'a>,
-    P: IntoIterator,
-    P::Item: JsonPointer,
-{
-    parser._skip_to_unchecked(path);
-    parser.dec();
-    T::deserialize(&mut Unchecked(parser)).unwrap_unchecked()
 }
 
 /// Skips to the given path and deserializes the specified type.
@@ -1424,35 +1438,7 @@ pub fn get_from<'a, S, T, P>(src: S, path: P) -> Result<T>
 where
     S: Source + 'a,
     T: Deserialize<'a>,
-    P: IntoIterator,
-    P::Item: JsonPointer,
+    P: IntoIterator<Item: JsonPointer>,
 {
     get_with_parser(path, &mut Parser::new(src))
-}
-
-/// Skips to the given path and deserializes the specified type.
-///
-/// Similar to [`get_from`], but without validation.
-/// This function's behavior is undefined if any of the following conditions are not met:
-///
-/// - The JSON must be valid.
-/// - The path must exist.
-/// - The specified type must be deserializable from the provided JSON data.
-///
-/// # Example
-/// ```
-/// let src = r#"{"segfault?": 28526}"#;
-/// let res: u16 = unsafe { flexon::get_from_unchecked(src, ["segfault?"]) };
-///
-/// assert_eq!(&res.to_le_bytes(), b"no");
-/// ```
-#[inline]
-pub unsafe fn get_from_unchecked<'a, S, T, P>(src: S, path: P) -> T
-where
-    S: Source<Volatility = NonVolatile> + 'a,
-    T: Deserialize<'a>,
-    P: IntoIterator,
-    P::Item: JsonPointer,
-{
-    get_with_parser_unchecked(path, &mut Parser::new(src))
 }

@@ -1,5 +1,4 @@
-// taken from `utf8parse` crate at version `0.2.2`, messing with utf-8 validation
-// is just beyond my scope. this is used for `skip_to()` to avoid requiring `alloc`.
+// taken from `utf8parse` crate at version `0.2.2`, this is used for `skip_to()` to avoid requiring `alloc`.
 
 pub struct Parser(State);
 

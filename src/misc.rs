@@ -30,33 +30,6 @@ pub const ESC_LUT: [u8; 256] = {
     tmp
 };
 
-// refer to `ValueBuilder::literal`
-pub const NON_LIT_LUT: [bool; 256] = {
-    let mut tmp = [false; 256];
-    let mut idx = 128;
-
-    while idx != 256 {
-        tmp[idx] = true;
-        idx += 1;
-    }
-
-    tmp[b'{' as usize] = true;
-    tmp[b'}' as usize] = true;
-    tmp[b'[' as usize] = true;
-    tmp[b']' as usize] = true;
-    tmp[b'"' as usize] = true;
-    tmp[b':' as usize] = true;
-    tmp[b',' as usize] = true;
-    tmp[b'/' as usize] = true;
-    tmp[b' ' as usize] = true;
-    tmp[b'\n' as usize] = true;
-    tmp[b'\t' as usize] = true;
-    tmp[b'\r' as usize] = true;
-    tmp[b'\0' as usize] = true;
-
-    tmp
-};
-
 pub trait Sealed {}
 
 #[inline(always)]
@@ -75,12 +48,6 @@ pub fn unlikely(b: bool) -> bool {
 
     #[cfg(not(feature = "nightly"))]
     return b;
-}
-
-#[inline(always)]
-pub fn cold_path() {
-    #[cfg(feature = "nightly")]
-    core::hint::cold_path()
 }
 
 #[inline(never)]

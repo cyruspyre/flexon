@@ -133,7 +133,7 @@ fn compute_inside_mask(mut mask: u64) -> u64 {
 
 #[inline(always)]
 fn compute_esc_mask(mut mask: u64, last_slash: &mut u64) -> u64 {
-    // took it from `sonic_rs`. why should i torture myself?
+    // from `sonic_rs`
     const ODD: u64 = 0x5555_5555_5555_5555;
 
     mask &= !*last_slash;
@@ -181,8 +181,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
         );
 
-        if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
-            self.inc(1);
+        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
             let chunk = _mm_loadu_si128(self.cur_ptr().cast());
             let idx = _mm_cmpistri(needle, chunk, _SIDD_NEGATIVE_POLARITY);
 
@@ -191,7 +190,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 return true;
             }
 
-            self.inc(15)
+            self.inc(16)
         }
 
         false
@@ -201,8 +200,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse2")]
     unsafe fn wh_sse2(&mut self) -> bool {
-        if S::NULL_PADDED || self.idx() + 16 < self.src.len() {
-            self.inc(1);
+        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
             let chunk = _mm_loadu_si128(self.cur_ptr().cast());
             let mask = _mm_movemask_epi8(_mm_xor_si128(
                 _mm_or_si128(
@@ -223,7 +221,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 return true;
             }
 
-            self.inc(15)
+            self.inc(16)
         }
 
         false
@@ -231,8 +229,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     #[inline]
     fn wh_swar(&mut self) -> bool {
-        if S::NULL_PADDED || self.idx() + 8 < self.src.len() {
-            self.inc(1);
+        if S::NULL_PADDED || self.idx() + 8 <= self.src.len() {
             let chunk = unsafe { self.cur_ptr().cast::<u64>().read_unaligned() };
 
             let a = chunk ^ (b' ' as u64 * ONES);
@@ -252,111 +249,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 return true;
             }
 
-            self.inc(7);
-        }
-
-        false
-    }
-}
-
-impl<S: Source, C: Config> Parser<'_, S, C> {
-    #[inline]
-    pub(crate) fn simd_lit(&mut self) -> bool {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            #[cfg(feature = "runtime-detection")]
-            return if is_x86_feature_detected!("sse4.2") {
-                self.lit_sse4_2()
-            } else {
-                self.lit_sse2()
-            };
-
-            #[cfg(not(feature = "runtime-detection"))]
-            {
-                #[cfg(all(feature = "simd", target_feature = "sse4.2"))]
-                return self.lit_sse4_2();
-
-                #[cfg(not(all(feature = "simd", target_feature = "sse4.2")))]
-                return self.lit_sse2();
-            }
-        }
-
-        #[cfg(not(target_arch = "x86_64"))]
-        false
-    }
-
-    #[inline]
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "sse4.2")]
-    unsafe fn lit_sse4_2(&mut self) -> bool {
-        let needle = _mm_setr_epi8(
-            0x7B, 0x7D, 0x5B, 0x5D, // '{'  | '}'  | '['  | ']'
-            0x20, 0x22, 0x3A, 0x2C, // ' '  | '"'  | ':'  | ','
-            0x0A, 0x09, 0x0D, 0x00, // '\n' | '\t' | '\r' | '\0'
-            0x00, 0x00, 0x00, 0x00, //  __  |  __  |  __  |  __
-        );
-
-        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
-            let chunk = _mm_loadu_si128(self.cur_ptr().cast());
-            let idx = _mm_cmpestri(needle, 12, chunk, 16, 0);
-
-            if idx != 16 {
-                self.inc(idx as u32 as _);
-                return true;
-            }
-
-            self.inc(16);
-        }
-
-        false
-    }
-
-    #[inline]
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "sse2")]
-    unsafe fn lit_sse2(&mut self) -> bool {
-        if S::NULL_PADDED || self.idx() + 16 <= self.src.len() {
-            let chunk = _mm_loadu_si128(self.cur_ptr().cast());
-            let mask = _mm_movemask_epi8(_mm_or_si128(
-                _mm_or_si128(
-                    _mm_or_si128(
-                        // '{', '}', '[', ']'
-                        _mm_cmpeq_epi8(
-                            _mm_and_si128(
-                                _mm_sub_epi8(chunk, _mm_set1_epi8(91)),
-                                _mm_set1_epi8(-35),
-                            ),
-                            _mm_setzero_si128(),
-                        ),
-                        // '\t', '\r'
-                        _mm_cmpeq_epi8(
-                            _mm_and_si128(chunk, _mm_set1_epi8(-33)),
-                            _mm_setzero_si128(),
-                        ),
-                    ),
-                    // ' ', '\0'
-                    _mm_cmpeq_epi8(_mm_and_si128(chunk, _mm_set1_epi8(-5)), _mm_set1_epi8(9)),
-                ),
-                _mm_or_si128(
-                    _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'\n' as i8)),
-                    _mm_or_si128(
-                        _mm_or_si128(
-                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'"' as i8)),
-                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b':' as i8)),
-                        ),
-                        _mm_or_si128(
-                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b',' as i8)),
-                            _mm_cmpeq_epi8(chunk, _mm_set1_epi8(b'/' as i8)),
-                        ),
-                    ),
-                ),
-            ));
-
-            if mask != 0 {
-                self.inc(mask.trailing_zeros() as _);
-                return true;
-            }
-            self.inc(16);
+            self.inc(8)
         }
 
         false
@@ -390,14 +283,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse2")]
     unsafe fn str_sse2(&mut self) -> bool {
-        // The parser starts its index from usize::MAX.
-        //
-        // When deserializing, the index will always be 0 at minimum for this function
-        // as the parser doesn't call it unless the it comes across '"'.
-        //
-        // However, during serialization, the starting index will always be usize::MAX.
-        // So we use wrapping_add, which is safe in this context.
-        if S::NULL_PADDED || likely(self.idx().wrapping_add(16) < self.src.len()) {
+        if S::NULL_PADDED || likely(self.idx() + 16 < self.src.len()) {
             let chunk = _mm_loadu_si128(self.cur_ptr().add(1).cast());
             let mask = _mm_movemask_epi8(_mm_or_si128(
                 _mm_or_si128(
@@ -445,8 +331,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
     #[inline]
     fn str_swar(&mut self) -> bool {
-        // refer to `str_sse2` for use of wrapping_add
-        if S::NULL_PADDED || likely(self.idx().wrapping_add(8) < self.src.len()) {
+        if S::NULL_PADDED || likely(self.idx() + 8 < self.src.len()) {
             const QUOTE: u64 = b'"' as u64 * ONES;
             const SLASH: u64 = b'\\' as u64 * ONES;
             const CTRL: u64 = 0x20 * ONES;
@@ -730,7 +615,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 b'}' | b']' => {
                     depth -= 1;
                     if depth == 0 {
-                        return self.dec();
+                        return self.dec(1);
                     }
                 }
                 _ => continue,
@@ -848,7 +733,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         not(feature = "runtime-detection")
     )))]
     pub(crate) fn parse_mantissa(&mut self, mantissa: &mut u64) {
-        if (S::NULL_PADDED || self.idx() + 7 < self.src.len())
+        if (S::NULL_PADDED || self.idx() + 8 <= self.src.len())
             && let Some(chunk) = simd_u64(self.cur_ptr())
         {
             *mantissa = mantissa.wrapping_mul(100_000_000).wrapping_add(chunk);
@@ -856,10 +741,9 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         while S::NULL_PADDED || self.idx() != self.src.len() {
-            let num = self.cur().wrapping_sub(b'0');
-            if num > 9 {
+            let num @ ..10 = self.cur().wrapping_sub(b'0') else {
                 break;
-            }
+            };
 
             *mantissa = mantissa.wrapping_mul(10).wrapping_add(num as _);
             self.inc(1);

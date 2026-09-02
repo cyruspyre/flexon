@@ -7,18 +7,10 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
     /// Whether the value that it is building is lazy.
     ///
     /// If `true` the parser won't call any of the building methods except for [`ValueBuilder::raw`] at the end of parsing.
-    /// This allows the parser to skip *efficiently* while also validating the JSON. As of right now, it will ignore the
-    /// following flags [`CUSTOM_LITERAL`](Self::CUSTOM_LITERAL), [`REJECT_CTRL_CHAR`](StringBuilder::REJECT_CTRL_CHAR)
-    /// and [`REJECT_INVALID_ESCAPE`](StringBuilder::REJECT_INVALID_ESCAPE). [`ValueBuilder::apply_span`] won't be called either.
+    /// This allows the parser to skip *efficiently* while also validating the JSON. As of right now, [`ValueBuilder::apply_span`] won't be called.
     ///
     /// Requires the source to be non volatile.
     const LAZY: bool;
-
-    /// Whether the value is to parse literals by itself.
-    ///
-    /// If `true` the parser will not parse the literals but will call [`ValueBuilder::literal`] to parse them.
-    /// This excludes string literals.
-    const CUSTOM_LITERAL: bool;
 
     /// The error type used by this builder.
     type Error: ErrorBuilder;
@@ -30,15 +22,7 @@ pub trait ValueBuilder<'a, S: Source>: Sized {
     type Object: ObjectBuilder<Self::String, Self> + Into<Self>;
 
     /// The string type used by this builder.
-    type String: StringBuilder<'a, S, Self::Error> + Into<Self>;
-
-    /// Creates a value by the given byte slice.
-    ///
-    /// Called when [`CUSTOM_LITERAL`](Self::CUSTOM_LITERAL) is `true`. The provided byte slice
-    /// contains only contiguous ASCII bytes, excluding the following:
-    ///
-    /// `'{'`, `'}'`, `'['`, `']'`, `'"'`, `':'`, `','`, `'/'`, `' '`, `'\n'`, `'\t'`, `'\r'`, `'\0'`
-    fn literal(s: &'a [u8]) -> Result<Self, Self::Error>;
+    type String: StringBuilder<'a, S> + Into<Self>;
 
     /// Creates a value by the given integer value.
     fn integer(val: u64, neg: bool) -> Self;
@@ -102,13 +86,7 @@ pub trait ObjectBuilder<K, V> {
 }
 
 /// Trait for building JSON string during parsing.
-pub trait StringBuilder<'a, S: Source, E: ErrorBuilder> {
-    /// Whether to reject unescaped ascii control characters.
-    const REJECT_CTRL_CHAR: bool;
-
-    /// Whether to reject invalid escape sequences.
-    const REJECT_INVALID_ESCAPE: bool;
-
+pub trait StringBuilder<'a, S: Source> {
     /// Create a new string builder.
     fn new() -> Self;
 
@@ -137,10 +115,6 @@ pub trait StringBuilder<'a, S: Source, E: ErrorBuilder> {
 
     /// Applies span information. The given offsets will be byte offsets.
     fn apply_span(&mut self, start: usize, end: usize);
-
-    /// This function will always be called at the end of parsing string.
-    /// The given byte slice is the whole string excluding the surrounding quotes.
-    fn on_complete(&mut self, s: &'a [u8]) -> Result<(), E>;
 }
 
 /// Trait for building errors during parsing.

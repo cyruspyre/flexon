@@ -203,11 +203,7 @@ impl Value {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&self, p: P) -> Option<&Value>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer<P: IntoIterator<Item: JsonPointer>>(&self, p: P) -> Option<&Value> {
         let mut tmp = self;
 
         for pointer in p {
@@ -222,11 +218,7 @@ impl Value {
     }
 
     /// Looks up a value by the given path and returns a mutable reference.
-    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut Value>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer_mut<P: IntoIterator<Item: JsonPointer>>(&mut self, p: P) -> Option<&mut Value> {
         let mut tmp = self;
 
         for pointer in p {

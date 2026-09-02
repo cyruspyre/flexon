@@ -44,7 +44,7 @@ pub use serde::de::{
 
 #[doc(inline)]
 #[cfg(all(feature = "serde", feature = "alloc"))]
-pub use serde::de::{from_mut_null_padded, from_null_padded, get_from, get_from_unchecked};
+pub use serde::de::{from_mut_null_padded, from_null_padded, get_from};
 
 #[doc(inline)]
 #[cfg(all(feature = "serde", feature = "std"))]
@@ -92,8 +92,7 @@ pub fn parse_at<'a, S, V, P>(s: S, p: P) -> Result<V, V::Error>
 where
     S: Source + 'a,
     V: ValueBuilder<'a, S>,
-    P: IntoIterator,
-    P::Item: JsonPointer,
+    P: IntoIterator<Item: JsonPointer>,
 {
     Parser::new(s).parse_at(p)
 }

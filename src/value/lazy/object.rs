@@ -1,5 +1,6 @@
 use crate::{
-    Error, Parser, value::{
+    Parser,
+    value::{
         borrowed::String,
         lazy::{Raw, Value},
     },
@@ -36,31 +37,33 @@ impl<'a> Object<'a> {
 
     /// Returns a mutable reference to the value associated with the given key, skipping and finding if necessary.
     pub fn get(&mut self, key: &str) -> Option<&mut Value<'a>> {
-        for (k, v) in unsafe { &mut *(&mut self.buf as *mut Vec<(String, _)>) } {
-            if **k == *key {
+        for (k, v) in &mut self.buf {
+            if k.as_str() == key {
                 return Some(v);
             }
         }
 
-        let mut tmp = unsafe { Parser::new(self.raw.get_unchecked(1..)) };
+        let mut tmp = Parser::new(self.raw);
 
         loop {
+            tmp.inc(1);
             match tmp.skip_whitespace() {
                 b'"' => unsafe {
-                    let new = tmp.string_unchecked::<String, String, Error>();
+                    let new = tmp.parse_string_unchecked::<String, String>();
+                    tmp.inc(1);
                     tmp.skip_whitespace(); // skip ':'
-                    let wtf = tmp.skip_whitespace();
+                    tmp.inc(1);
+                    let char = tmp.skip_whitespace();
 
                     if &*new == key {
-                        self.buf.push((
-                            new,
-                            Value::Raw(Raw(self.raw.get_unchecked(tmp.idx() + 1..))),
-                        ));
+                        let res = self
+                            .buf
+                            .push_mut((new, Value::Raw(Raw(self.raw.get_unchecked(tmp.idx()..)))));
 
-                        return Some(&mut self.buf.last_mut().unwrap_unchecked().1);
+                        return Some(&mut res.1);
                     }
 
-                    match wtf {
+                    match char {
                         b'"' => tmp.skip_string_unchecked(),
                         b'{' | b'[' => tmp.skip_container_unchecked(),
                         _ => tmp.skip_literal_unchecked(),
@@ -76,15 +79,18 @@ impl<'a> Object<'a> {
     /// Returns the actual number of elements by skipping and counting.
     pub fn actual_len(&self) -> usize {
         let mut count = 0;
-        let mut tmp = unsafe { Parser::new(self.raw.get_unchecked(1..)) };
+        let mut tmp = Parser::new(self.raw);
 
         loop {
+            tmp.inc(1);
             match tmp.skip_whitespace() {
                 b'"' => {
                     count += 1;
 
                     tmp.skip_string_unchecked();
+                    tmp.inc(1);
                     tmp.skip_whitespace(); // skip ':'
+                    tmp.inc(1);
                     tmp.skip_value_unchecked();
                 }
                 b',' => continue,

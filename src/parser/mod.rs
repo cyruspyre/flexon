@@ -11,7 +11,7 @@ use crate::{
     value::builder::*,
 };
 use core::{
-    hint::select_unpredictable,
+    hint::cold_path,
     marker::PhantomData,
     slice::from_raw_parts,
     str::{from_utf8_unchecked, from_utf8_unchecked_mut},
@@ -79,12 +79,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             cur: match S::NULL_PADDED {
                 true => Cur {
                     ptr: match S::INSITU {
-                        true => unsafe { src.ptr_mut(0).sub(1) },
-                        // not actually mutating
-                        _ => unsafe { src.ptr(0).sub(1).cast_mut() },
+                        true => src.ptr_mut(0),
+                        _ => src.ptr(0).cast_mut(), // not actually mutating
                     },
                 },
-                _ => Cur { idx: usize::MAX },
+                _ => Cur { idx: 0 },
             },
             __: PhantomData,
             src,
@@ -137,13 +136,26 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             )
         }
 
-        if V::LAZY {
-            // "mom, can we have json skipper??"
-            // "no we have json skipper at home"
-            self.skip_value()?;
-            Ok(unsafe { V::raw(from_raw_parts(self.src.ptr(0), self.src.len())) })
-        } else {
-            self.value()
+        if !V::LAZY {
+            return self.parse_value();
+        }
+
+        let char = self.skip_whitespace();
+        let start = self.idx();
+
+        match char {
+            b'"' => self.skip_string(),
+            b'{' => self.skip_object(),
+            b'[' => self.skip_array(),
+            0 => return Err(V::Error::expected_value()),
+            _ => unsafe { self.skip_literal() },
+        }?;
+
+        unsafe {
+            Ok(V::raw(from_raw_parts(
+                self.src.ptr(start),
+                self.src.len() - start,
+            )))
         }
     }
 
@@ -169,12 +181,12 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             )
         }
 
-        if V::LAZY {
-            // omg so fast
-            V::raw(from_raw_parts(self.src.ptr(0), self.src.len()))
-        } else {
-            self.value_unchecked()
+        if !V::LAZY {
+            return self.parse_value_unchecked();
         }
+
+        self.skip_whitespace();
+        V::raw(from_raw_parts(self.cur_ptr(), self.src.len() - self.idx()))
     }
 
     /// Skips to the given path and parses JSON into the specified type.
@@ -196,8 +208,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub fn parse_at<V, P>(&mut self, p: P) -> Result<V, V::Error>
     where
         V: ValueBuilder<'a, S>,
-        P: IntoIterator,
-        P::Item: JsonPointer,
+        P: IntoIterator<Item: JsonPointer>,
     {
         const {
             assert!(
@@ -210,8 +221,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             let char = self._skip_to(p)?;
 
             if V::LAZY {
-                // source is non volatile
-                let start = self.cur_ptr();
+                let start = self.idx();
+
                 match char {
                     b'"' => self.skip_string(),
                     b'{' => self.skip_object(),
@@ -221,14 +232,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 }?;
 
                 Ok(V::raw(from_raw_parts(
-                    start,
-                    self.cur_ptr().offset_from_unsigned(start) + 1,
+                    self.src.ptr(start),
+                    self.src.len() - start,
                 )))
             } else {
                 match char {
-                    b'"' => self.string::<_, V::String, _>(),
-                    b'{' => self.object(),
-                    b'[' => self.array(),
+                    b'"' => self.parse_string::<_, V::String, _>(),
+                    b'{' => self.parse_object(),
+                    b'[' => self.parse_array(),
                     0 => {
                         #[allow(unused_mut)]
                         let mut tmp = V::Error::expected_value();
@@ -236,7 +247,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         tmp.apply_span(self.idx(), self.idx());
                         Err(tmp)
                     }
-                    _ => self.literal(),
+                    _ => self.parse_literal(),
                 }
             }
         }
@@ -268,28 +279,17 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         unsafe {
             match S::NULL_PADDED {
                 true => self.cur.ptr = self.cur.ptr.add(n),
-                _ => self.cur.idx = self.cur.idx.wrapping_add(n),
+                _ => self.cur.idx += n,
             }
         }
     }
 
     #[inline(always)]
-    pub(crate) fn dec(&mut self) {
+    pub(crate) fn dec(&mut self, n: usize) {
         unsafe {
             match S::NULL_PADDED {
-                true => self.cur.ptr = self.cur.ptr.sub(1),
-                _ => self.cur.idx = self.cur.idx.wrapping_sub(1),
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn dec_if_not_empty(&mut self) {
-        unsafe {
-            let tmp = (self.src.len() != 0) as _;
-            match S::NULL_PADDED {
-                true => self.cur.ptr = self.cur.ptr.sub(tmp),
-                _ => self.cur.idx = self.cur.idx.wrapping_sub(tmp),
+                true => self.cur.ptr = self.cur.ptr.sub(n),
+                _ => self.cur.idx -= n,
             }
         }
     }
@@ -331,125 +331,118 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     pub(crate) fn skip_whitespace(&mut self) -> u8 {
-        let mut fast = false;
+        let mut simd = false;
 
         loop {
-            if match S::NULL_PADDED {
-                true => unsafe { *self.cur_ptr().add(1) == 0 },
-                _ => self.idx().wrapping_add(1) >= self.src.len(),
-            } {
+            if !S::NULL_PADDED && self.idx() >= self.src.len() {
                 return 0;
             }
 
-            self.inc(1);
             let tmp = self.cur();
-
             if !matches!(tmp, b' ' | b'\t' | b'\n' | b'\r') {
                 #[cfg(feature = "comment")]
-                if tmp == b'/' && self.cfg.comments() {
-                    self.comment();
+                if tmp == b'/' && self.cfg.comments() && self.parse_comment() {
                     continue;
                 }
 
                 return tmp;
             }
 
-            if fast && self.simd_wh() {
+            self.inc(1);
+            if simd && self.simd_wh() {
                 #[cfg(feature = "comment")]
-                if self.cur() == b'/' && self.cfg.comments() {
-                    self.comment();
+                if self.cur() == b'/' && self.cfg.comments() && self.parse_comment() {
                     continue;
                 }
 
                 return self.cur();
             }
 
-            fast = true;
+            simd = true;
         }
     }
 
+    // This function expects to be called at '/', reading `n + 1` on `true`,
+    // `0` on `false` where `n` is the length of the comment.
+    #[inline(never)]
     #[cfg(feature = "comment")]
-    fn comment(&mut self) {
-        // i dont think its worth adding simd here
-        if match S::NULL_PADDED {
-            true => unsafe { *self.cur_ptr().add(1) == 0 },
-            _ => self.idx() + 1 == self.src.len(),
-        } {
-            return;
+    pub(crate) fn parse_comment(&mut self) -> bool {
+        self.inc(1);
+        if !S::NULL_PADDED && self.idx() == self.src.len() {
+            self.dec(1);
+            return false;
         }
 
-        self.inc(1);
         let mut multi = false;
-        let stamp = self.idx() + 1;
+        let offset = self.idx() + 1;
 
         match self.cur() {
             b'/' => loop {
-                if match S::NULL_PADDED {
-                    true => unsafe { *self.cur_ptr().add(1) == 0 },
-                    _ => self.idx() + 1 == self.src.len(),
-                } {
-                    return;
+                self.inc(1);
+                if !S::NULL_PADDED && self.idx() == self.src.len() {
+                    break;
                 }
 
-                self.inc(1);
-                if self.cur() == b'\n' {
-                    break;
+                match self.cur() {
+                    b'\n' | b'\r' => break,
+                    0 if S::NULL_PADDED => break,
+                    _ => {}
                 }
             },
             b'*' => loop {
-                if match S::NULL_PADDED {
-                    true => unsafe { *self.cur_ptr().add(1) == 0 },
-                    _ => self.idx() + 1 == self.src.len(),
-                } {
-                    return;
+                self.inc(1);
+                if !S::NULL_PADDED && self.idx() == self.src.len() {
+                    return true;
                 }
 
-                self.inc(1);
-                if self.cur() == b'*'
-                    && match S::NULL_PADDED {
-                        true => unsafe { *self.cur_ptr().add(1) != b'0' },
-                        _ => self.idx() + 1 != self.src.len(),
+                match self.cur() {
+                    b'*' if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
+                        && unsafe { *self.cur_ptr().add(1) == b'/' } =>
+                    {
+                        multi = true;
+                        self.inc(2);
+                        break;
                     }
-                    && unsafe { *self.cur_ptr().add(1) == b'/' }
-                {
-                    multi = true;
-                    self.inc(1);
-                    break;
+                    0 if S::NULL_PADDED => return true,
+                    _ => {}
                 }
             },
             _ => {
-                self.dec();
-                return;
+                self.dec(1);
+                return false;
             }
         }
 
         let idx = self.idx();
-        let len = idx - stamp - multi as usize;
-        let src = self.src.ptr(stamp).cast_mut();
+        let len = idx - offset - multi as usize * 2;
+        let src = self.src.ptr(offset);
 
-        self.comments.push(Comment::new(
-            src,
-            len,
-            multi,
-            // omits checking non zero len when (de)allocating
-            S::Volatility::IS_VOLATILE && len != 0,
-            #[cfg(feature = "span")]
-            [stamp - 2, idx - !multi as usize],
-        ))
+        if S::UTF8 || unsafe { from_utf8(from_raw_parts(src, len)).is_ok() } {
+            self.comments.push(Comment::new(
+                src,
+                len,
+                multi,
+                S::Volatility::IS_VOLATILE && len != 0,
+                #[cfg(feature = "span")]
+                [offset - 2, idx - 1],
+            ));
+        }
+
+        true
     }
 
     #[inline]
-    fn value<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
+    fn parse_value<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         if S::Volatility::IS_VOLATILE {
-            let tmp = self.idx().wrapping_add(1);
+            let tmp = self.idx();
             self.src.trim(tmp);
         }
 
         unsafe {
             match self.skip_whitespace() {
-                b'"' => self.string::<_, V::String, V::Error>(),
-                b'{' => self.object(),
-                b'[' => self.array(),
+                b'"' => self.parse_string::<_, V::String, V::Error>(),
+                b'{' => self.parse_object(),
+                b'[' => self.parse_array(),
                 0 => {
                     #[allow(unused_mut)]
                     let mut tmp = V::Error::expected_value();
@@ -457,19 +450,20 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     tmp.apply_span(self.idx(), self.idx());
                     Err(tmp)
                 }
-                _ => self.literal(),
+                _ => self.parse_literal(),
             }
         }
     }
 
     #[allow(unused_mut)]
-    unsafe fn object<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
+    unsafe fn parse_object<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         #[cfg(feature = "span")]
         let start = self.idx();
         #[cfg(feature = "prealloc")]
         let mut obj = V::Object::with_capacity(self.prealloc);
         #[cfg(not(feature = "prealloc"))]
         let mut obj = V::Object::new();
+        self.inc(1);
         let mut tmp = self.skip_whitespace();
 
         if tmp == b'}' {
@@ -481,20 +475,35 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             return Ok(tmp);
         }
 
+        #[cfg(feature = "span")]
+        let err_idx;
         let mut err = loop {
             if tmp != b'"' {
+                #[cfg(feature = "span")]
+                (err_idx = self.idx());
                 break V::Error::unexpected_token();
             }
 
-            let key = self.string::<V::String, V::String, V::Error>()?;
+            let key = self.parse_string::<V::String, V::String, V::Error>()?;
+
+            self.inc(1);
             if self.skip_whitespace() != b':' {
+                #[cfg(feature = "span")]
+                (err_idx = self.idx());
                 break V::Error::expected_colon();
             }
 
-            obj.on_value(key, self.value()?);
+            self.inc(1);
+            obj.on_value(key, self.parse_value()?);
+            self.inc(1);
             tmp = self.skip_whitespace();
+
+            #[cfg(feature = "span")]
+            let comma_idx = self.idx();
             let comma = tmp == b',';
+
             if comma {
+                self.inc(1);
                 tmp = self.skip_whitespace();
             }
 
@@ -513,7 +522,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 }
 
                 #[cfg(feature = "span")]
-                self.dec();
+                (err_idx = comma_idx);
                 break V::Error::trailing_comma();
             }
 
@@ -521,6 +530,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 continue;
             }
 
+            #[cfg(feature = "span")]
+            (err_idx = self.idx());
             break match tmp {
                 0 => V::Error::eof(),
                 _ => V::Error::unexpected_token(),
@@ -528,16 +539,17 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         };
 
         #[cfg(feature = "span")]
-        err.apply_span(self.idx(), self.idx());
+        err.apply_span(err_idx, err_idx);
         cold_path();
         Err(err)
     }
 
     #[allow(unused_mut)]
-    unsafe fn array<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
+    unsafe fn parse_array<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         #[cfg(feature = "span")]
         let start = self.idx();
         let mut arr = V::Array::new();
+        self.inc(1);
         let mut tmp = self.skip_whitespace();
 
         if tmp == b']' {
@@ -549,24 +561,31 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             return Ok(tmp);
         }
 
+        #[cfg(feature = "span")]
+        let err_idx;
         let mut err = loop {
             arr.on_value(match tmp {
-                b'"' => self.string::<_, V::String, _>(),
-                b'{' => self.object(),
-                b'[' => self.array(),
+                b'"' => self.parse_string::<_, V::String, _>(),
+                b'{' => self.parse_object(),
+                b'[' => self.parse_array(),
                 0 => {
-                    #[allow(unused_mut)]
                     let mut err = V::Error::eof();
                     #[cfg(feature = "span")]
                     err.apply_span(self.idx(), self.idx());
                     return Err(err);
                 }
-                _ => self.literal(),
+                _ => self.parse_literal(),
             }?);
+
+            self.inc(1);
             tmp = self.skip_whitespace();
+
+            #[cfg(feature = "span")]
+            let comma_idx = self.idx();
             let comma = tmp == b',';
 
             if comma {
+                self.inc(1);
                 tmp = self.skip_whitespace();
             }
 
@@ -581,7 +600,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 }
 
                 #[cfg(feature = "span")]
-                self.dec();
+                (err_idx = comma_idx);
                 break V::Error::trailing_comma();
             }
 
@@ -589,6 +608,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 continue;
             }
 
+            #[cfg(feature = "span")]
+            (err_idx = self.idx());
             break match tmp {
                 0 => V::Error::eof(),
                 _ => V::Error::unexpected_token(),
@@ -596,14 +617,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         };
 
         #[cfg(feature = "span")]
-        err.apply_span(self.idx(), self.idx());
+        err.apply_span(err_idx, err_idx);
         cold_path();
         Err(err)
     }
 
-    unsafe fn string<T, V, E>(&mut self) -> Result<T, E>
+    unsafe fn parse_string<T, V, E>(&mut self) -> Result<T, E>
     where
-        V: StringBuilder<'a, S, E> + Into<T>,
+        V: StringBuilder<'a, S> + Into<T>,
         E: ErrorBuilder,
     {
         let start = self.idx();
@@ -641,25 +662,18 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         }
 
                         if tmp == b'u'
-                            && let Some(v) = self.unicode_escape(&mut [0; 4])
+                            && let Some(v) = self.parse_unicode_escape(&mut [0; 4])
                         {
                             offset = self.idx() + 1;
                             buf.on_escape(v);
                             continue;
                         }
 
-                        if V::REJECT_INVALID_ESCAPE {
-                            break E::invalid_escape();
-                        }
-
-                        continue;
+                        E::invalid_escape()
                     }
                     0x20.. => continue,
                     0 if S::NULL_PADDED => E::eof(),
-                    _ => match V::REJECT_CTRL_CHAR {
-                        true => E::control_character(),
-                        _ => continue,
-                    },
+                    _ => E::control_character(),
                 };
             };
             #[allow(unused_mut)]
@@ -670,8 +684,10 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             return Err(err);
         };
-        let raw = from_raw_parts(self.src.ptr(start + 1), end - start - 1);
 
+        buf.on_final_chunk(from_raw_parts(self.src.ptr(offset), end - offset));
+
+        let raw = from_raw_parts(self.src.ptr(start + 1), end - start - 1);
         if !S::UTF8 {
             #[cfg(feature = "span")]
             if let Err(utf) = from_utf8(raw) {
@@ -687,26 +703,20 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
         }
 
-        buf.on_final_chunk(from_raw_parts(self.src.ptr(offset), end - offset));
-        buf.on_complete(raw)?;
         #[cfg(feature = "span")]
         buf.apply_span(start, end);
 
         Ok(buf.into())
     }
 
-    // cba
     #[inline(never)]
-    pub(crate) unsafe fn unicode_escape<'esc>(
+    pub(crate) unsafe fn parse_unicode_escape<'esc>(
         &mut self,
         buf: &'esc mut [u8; 4],
     ) -> Option<&'esc [u8]> {
         self.inc(4);
         if !S::NULL_PADDED && self.idx() >= self.src.len() {
-            match S::NULL_PADDED {
-                true => self.cur.ptr = self.cur.ptr.sub(4),
-                _ => self.cur.idx = self.cur.idx.wrapping_sub(4),
-            }
+            self.dec(4);
             return None;
         }
 
@@ -718,15 +728,16 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             _ => return None,
         };
 
-        if (0xD800..=0xDBFF).contains(&codepoint) {
+        if (0xD800..=0xDFFF).contains(&codepoint) {
+            if codepoint >= 0xDC00 {
+                return None;
+            }
+
             self.inc(6);
             if !S::NULL_PADDED && self.idx() >= self.src.len()
                 || from_raw_parts(self.cur_ptr().sub(5), 2) != br"\u"
             {
-                match S::NULL_PADDED {
-                    true => self.cur.ptr = self.cur.ptr.sub(6),
-                    _ => self.cur.idx = self.cur.idx.wrapping_sub(6),
-                }
+                self.dec(6);
                 return None;
             }
 
@@ -745,7 +756,12 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (low - 0xDC00));
         }
 
-        char::from_u32(codepoint).map(|v| v.encode_utf8(buf).as_bytes())
+        // `codepoint` <= 0x10FFFF (char::MAX) excluding `0xD800..=0xDFFF`
+        Some(
+            char::from_u32_unchecked(codepoint)
+                .encode_utf8(buf)
+                .as_bytes(),
+        )
     }
 
     #[cold]
@@ -771,35 +787,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     #[inline]
     #[allow(unused_mut)]
-    unsafe fn literal<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
-        if V::CUSTOM_LITERAL {
-            let start = self.idx();
-            let end = loop {
-                if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()
-                    || NON_LIT_LUT[self.cur() as usize]
-                {
-                    break self.idx();
-                }
-
-                self.inc(1);
-                if self.simd_lit() {
-                    break self.idx();
-                }
-            };
-            let len = end - start;
-
-            if len == 0 {
-                #[allow(unused_mut)]
-                let mut tmp = V::Error::unexpected_token();
-                #[cfg(feature = "span")]
-                tmp.apply_span(self.idx(), self.idx());
-                return Err(tmp);
-            }
-
-            self.dec();
-            return V::literal(from_raw_parts(self.src.ptr(start), len));
-        }
-
+    unsafe fn parse_literal<V: ValueBuilder<'a, S>>(&mut self) -> Result<V, V::Error> {
         #[cfg(feature = "span")]
         let stamp = self.idx();
         let tmp = self.cur();
@@ -834,7 +822,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             'int: {
                 if is_int {
-                    self.dec();
+                    self.dec(1);
                     let mut tmp = if neg {
                         if val > 9223372036854775808 {
                             break 'int;
@@ -876,11 +864,10 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 };
             }
 
-            let mut tmp = select_unpredictable(
-                *self.cur_ptr().sub(1) == b'.',
-                V::Error::trailing_decimal(),
-                V::Error::invalid_literal(),
-            );
+            let mut tmp = match *self.cur_ptr().sub(1) {
+                b'.' => V::Error::trailing_decimal(),
+                _ => V::Error::invalid_literal(),
+            };
 
             #[cfg(feature = "span")]
             tmp.apply_span(self.idx() - 1, self.idx() - 1);
@@ -888,26 +875,23 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         }
 
         self.inc(3);
-        let mut tmp = 'tmp: {
-            let mut err = 'err: {
-                break 'tmp if S::NULL_PADDED || self.idx() < self.src.len() {
-                    match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
-                        0x6c6c756e => V::null(),
-                        0x65757274 => V::bool(true),
-                        0x736c6166
-                            if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
-                                && *self.cur_ptr().add(1) == b'e' =>
-                        {
-                            self.inc(1);
-                            V::bool(false)
-                        }
-                        _ => break 'err V::Error::invalid_literal(),
+        let mut tmp = 'ok: {
+            if S::NULL_PADDED || self.idx() < self.src.len() {
+                match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
+                    0x6c6c756e => break 'ok V::null(),
+                    0x65757274 => break 'ok V::bool(true),
+                    0x736c6166
+                        if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
+                            && *self.cur_ptr().add(1) == b'e' =>
+                    {
+                        self.inc(1);
+                        break 'ok V::bool(false);
                     }
-                } else {
-                    break 'err V::Error::invalid_literal();
-                };
-            };
+                    _ => {}
+                }
+            }
 
+            let mut err = V::Error::invalid_literal();
             #[cfg(feature = "span")]
             err.apply_span(stamp, stamp);
             return Err(err);
@@ -969,7 +953,6 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         // ignore overflow as it will be handled in float parsing
         loop {
             if !S::NULL_PADDED && self.idx() == self.src.len() {
-                self.dec();
                 break;
             }
 
@@ -1003,8 +986,7 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
     pub unsafe fn parse_at_unchecked<V, P>(&mut self, p: P) -> V
     where
         V: ValueBuilder<'a, S>,
-        P: IntoIterator,
-        P::Item: JsonPointer,
+        P: IntoIterator<Item: JsonPointer>,
     {
         let char = self._skip_to_unchecked(p);
 
@@ -1012,10 +994,10 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
             V::raw(from_raw_parts(self.cur_ptr(), self.src.len() - self.idx()))
         } else {
             match char {
-                b'"' => self.string_unchecked::<_, V::String, _>(),
-                b'{' => self.object_unchecked(),
-                b'[' => self.array_unchecked(),
-                _ => self.literal_unchecked(),
+                b'"' => self.parse_string_unchecked::<_, V::String>(),
+                b'{' => self.parse_object_unchecked(),
+                b'[' => self.parse_array_unchecked(),
+                _ => self.parse_literal_unchecked(),
             }
         }
     }
@@ -1056,7 +1038,6 @@ impl<'a> Parser<'a, &'a str> {
             tmp.inc(e.valid_up_to())
         }
         tmp
-        // Self::new(simdutf8::basic::from_utf8(s).unwrap_or_default())
     }
 
     /// Creates a parser from `&[u8]`, without validating UTF-8 encoding.
@@ -1082,7 +1063,6 @@ impl<'a> Parser<'a, &'a mut str> {
             tmp.inc(e.valid_up_to())
         }
         tmp
-        // Self::new(simdutf8::basic::from_utf8_mut(s).unwrap_or_default())
     }
 
     /// Creates a parser from `&mut [u8]` without UTF-8 validation, may perform In-situ parsing.

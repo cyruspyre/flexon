@@ -25,7 +25,7 @@ pub struct Comment<'a> {
 impl<'a> Comment<'a> {
     #[inline]
     pub(crate) fn new(
-        src: *mut u8,
+        src: *const u8,
         len: usize,
         multi: bool,
         owned: bool,
@@ -46,7 +46,7 @@ impl<'a> Comment<'a> {
                     buf
                 },
                 // `src` is always non null
-                _ => unsafe { NonNull::new_unchecked(src) },
+                _ => unsafe { NonNull::new_unchecked(src.cast_mut()) },
             },
             len,
             owned,
@@ -84,7 +84,7 @@ impl<'a> Comment<'a> {
 
     /// Returns the ending byte offset of the comment.
     ///
-    /// In case of single-line comment, it does not include `\n`.
+    /// In case of single-line comment, it does not include the line separator.
     #[inline]
     #[cfg(feature = "span")]
     pub fn end(&'a self) -> usize {

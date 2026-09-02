@@ -42,8 +42,7 @@ impl<'a, 'de, S: Source, C: Config> SeqAccess<'de> for Builder<'a, 'de, S, C> {
             State::Start => {
                 self.state = State::Value;
                 self.de.skip_whitespace();
-                self.de.dec();
-                seed.deserialize(self.de.idx().wrapping_add(1).into_deserializer())
+                seed.deserialize(self.de.idx().into_deserializer())
             }
             State::Value => {
                 self.state = State::End;

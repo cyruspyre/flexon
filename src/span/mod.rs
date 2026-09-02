@@ -4,7 +4,6 @@
 mod value;
 
 use crate::{
-    Error,
     source::Source,
     value::builder::{ErrorBuilder, StringBuilder},
 };
@@ -109,14 +108,11 @@ impl<T: Debug> Debug for Span<T> {
     }
 }
 
-impl<'a, S, V> StringBuilder<'a, S, Span<Error>> for Span<V>
+impl<'a, S, V> StringBuilder<'a, S> for Span<V>
 where
     S: Source,
-    V: StringBuilder<'a, S, Span<Error>>,
+    V: StringBuilder<'a, S>,
 {
-    const REJECT_CTRL_CHAR: bool = V::REJECT_CTRL_CHAR;
-    const REJECT_INVALID_ESCAPE: bool = V::REJECT_INVALID_ESCAPE;
-
     #[inline]
     fn new() -> Self {
         Self::new(V::new())
@@ -141,11 +137,6 @@ where
     fn apply_span(&mut self, start: usize, end: usize) {
         self.start = start;
         self.end = end;
-    }
-
-    #[inline]
-    fn on_complete(&mut self, s: &'a [u8]) -> Result<(), Span<Error>> {
-        self.data.on_complete(s)
     }
 }
 

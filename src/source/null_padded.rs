@@ -9,76 +9,81 @@ use core::{alloc::Layout, ptr::NonNull};
 pub struct NullPadded {
     buf: NonNull<u8>,
     len: usize,
+    cap: usize,
 }
 
 impl NullPadded {
     /// Creates a new null padded buffer. This will not perform allocation.
     #[inline]
-    #[allow(static_mut_refs)]
     pub fn new() -> Self {
         // this will be never mutated.
         // just a placeholder in case empty buffer is passed.
-        static mut NULL: [u8; 64] = [0; 64];
+        static NULL: [u8; 64] = [0; 64];
 
         Self {
-            buf: unsafe { NonNull::new_unchecked(NULL.as_mut_ptr()) },
+            buf: unsafe { NonNull::new_unchecked(NULL.as_ptr().cast_mut()) },
             len: 0,
+            cap: 0,
         }
     }
 
     /// Creates a new null padded buffer from the given string slice. This will perform allocation.
-    #[inline]
     pub fn from_str(s: &str) -> Self {
         unsafe {
-            let len = s.len() + 64; // won't overflow, `s.len()` is garuanteed to be <= isize::MAX
-            let Ok(layout) = Layout::array::<u8>(len) else {
-                capacity_overflow()
-            };
-            let Some(buf) = NonNull::new(alloc(layout)) else {
-                handle_alloc_error(layout)
-            };
+            let cap = s.len() + 64;
+            let buf = Self::alloc(cap);
 
             buf.as_ptr().copy_from_nonoverlapping(s.as_ptr(), s.len());
             buf.add(s.len()).write_bytes(0, 64);
 
-            Self { buf, len }
+            Self {
+                buf,
+                cap,
+                len: s.len(),
+            }
         }
     }
 
     /// Writes the given string slice into the buffer.
     ///
-    /// This will perform allocation only if the buffer is too small for the
-    /// string slice with extra 64 bytes padding.
-    #[unsafe(no_mangle)]
+    /// This will perform allocation only if the heap allocated buffer
+    /// is too small for the string slice with extra 64 bytes padding.
     pub fn write_str(&mut self, s: &str) {
-        let new_len = s.len() + 64; // won't overflow, `s.len()` is garuanteed to be <= isize::MAX
-
-        if self.len < new_len {
+        let needed = s.len() + 64;
+        if self.cap < needed {
             unsafe {
-                if self.len != 0 {
-                    dealloc(
-                        self.buf.as_ptr(),
-                        Layout::array::<u8>(self.len).unwrap_unchecked(),
-                    )
-                }
-
-                let Ok(layout) = Layout::array::<u8>(new_len) else {
-                    capacity_overflow()
-                };
-                let Some(buf) = NonNull::new(alloc(layout)) else {
-                    handle_alloc_error(layout)
-                };
-
-                self.buf = buf;
-                self.len = new_len;
+                self.dealloc();
+                self.buf = Self::alloc(needed);
+                self.cap = needed;
             }
         }
 
+        self.len = s.len();
         unsafe {
             self.buf
                 .as_ptr()
                 .copy_from_nonoverlapping(s.as_ptr(), s.len());
             self.buf.add(s.len()).write_bytes(0, 64);
+        }
+    }
+
+    unsafe fn alloc(n: usize) -> NonNull<u8> {
+        let Ok(layout) = Layout::array::<u8>(n) else {
+            capacity_overflow()
+        };
+
+        match NonNull::new(alloc(layout)) {
+            Some(v) => v,
+            _ => handle_alloc_error(layout),
+        }
+    }
+
+    unsafe fn dealloc(&mut self) {
+        if self.cap != 0 {
+            dealloc(
+                self.buf.as_ptr(),
+                Layout::array::<u8>(self.cap).unwrap_unchecked(),
+            )
         }
     }
 }
@@ -137,13 +142,6 @@ impl Source for &NullPadded {
 
 impl Drop for NullPadded {
     fn drop(&mut self) {
-        if self.len != 0 {
-            unsafe {
-                dealloc(
-                    self.buf.as_ptr(),
-                    Layout::array::<u8>(self.len).unwrap_unchecked(),
-                )
-            }
-        }
+        unsafe { self.dealloc() }
     }
 }

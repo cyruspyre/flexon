@@ -31,25 +31,25 @@ impl<'a> Array<'a> {
 
     /// Returns a mutable reference to the value at the given index, skipping and finding if necessary.
     pub fn get(&mut self, mut idx: usize) -> Option<&mut Value<'a>> {
-        for (i, v) in unsafe { &mut *(&mut self.buf as *mut Vec<_>) } {
+        for (i, v) in &mut self.buf {
             if *i == idx {
                 return Some(v);
             }
         }
 
-        let mut tmp = unsafe { Parser::new(self.raw.get_unchecked(1..)) };
+        let mut tmp = Parser::new(self.raw);
 
         loop {
+            tmp.inc(1);
             match tmp.skip_whitespace() {
                 b',' => continue,
                 b']' => return None,
                 _ if idx == 0 => unsafe {
-                    self.buf.push((
-                        idx,
-                        Value::Raw(Raw(self.raw.get_unchecked(tmp.idx() + 1..))),
-                    ));
+                    let res = self
+                        .buf
+                        .push_mut((idx, Value::Raw(Raw(self.raw.get_unchecked(tmp.idx()..)))));
 
-                    return Some(&mut self.buf.last_mut().unwrap_unchecked().1);
+                    return Some(&mut res.1);
                 },
                 v => unsafe {
                     idx -= 1;
@@ -66,9 +66,10 @@ impl<'a> Array<'a> {
     /// Returns the actual number of elements by skipping and counting.
     pub fn actual_len(&self) -> usize {
         let mut count = 0;
-        let mut tmp = unsafe { Parser::new(self.raw.get_unchecked(1..)) };
+        let mut tmp = Parser::new(self.raw);
 
         loop {
+            tmp.inc(1);
             match tmp.skip_whitespace() {
                 b',' => continue,
                 b']' => return count,

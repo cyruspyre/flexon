@@ -5,10 +5,9 @@ mod dummy;
 mod object;
 
 use crate::{
-    Error, Parser,
+    Parser,
     pointer::JsonPointer,
-    source::{NonVolatile, Source},
-    value::{Number, borrowed::String, builder::ValueBuilder, lazy::dummy::*},
+    value::{Number, borrowed::String},
 };
 use core::{
     fmt::{self, Debug, Formatter},
@@ -55,7 +54,11 @@ impl<'a> Raw<'a> {
     #[inline]
     pub fn trim_to_value(&self) -> &'a str {
         let mut tmp = Parser::new(self.0);
-        tmp.skip_value_unchecked();
+        match tmp.cur() {
+            b'"' => tmp.skip_string_unchecked(),
+            b'{' | b'[' => unsafe { tmp.skip_container_unchecked() },
+            _ => tmp.skip_literal_unchecked(),
+        }
         unsafe { self.0.get_unchecked(..=tmp.idx()) }
     }
 }
@@ -185,18 +188,8 @@ impl<'a> Value<'a> {
     pub fn as_number(&mut self) -> Option<Number> {
         Some(match *self {
             Self::Number(v) => v,
-            Self::Raw(Raw(s))
-                if unsafe {
-                    matches!(
-                        *s.as_ptr(),
-                        b'-' | b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' | b'8' | b'9'
-                    )
-                } =>
-            unsafe {
-                let mut tmp = Parser::new(s);
-
-                tmp.inc(1);
-                *self = Self::Number(tmp.number_unchecked());
+            Self::Raw(Raw(s)) if unsafe { matches!(*s.as_ptr(), b'-' | b'0'..=b'9') } => unsafe {
+                *self = Self::Number(Parser::new(s).parse_number_unchecked());
 
                 match *self {
                     Self::Number(v) => v,
@@ -231,10 +224,8 @@ impl<'a> Value<'a> {
         Some(match *self {
             Self::String(ref mut v) => v,
             Self::Raw(Raw(s)) if unsafe { *s.as_ptr() == b'"' } => unsafe {
-                let mut tmp = Parser::new(s);
-
-                tmp.inc(1);
-                *self = Self::String(tmp.string_unchecked::<_, String, Error>());
+                let tmp = Parser::new(s).parse_string_unchecked::<String, String>();
+                *self = Self::String(tmp);
 
                 match self {
                     Self::String(v) => v,
@@ -309,12 +300,7 @@ impl<'a> Value<'a> {
     pub fn is_number(&self) -> bool {
         match self {
             Self::Number(_) => true,
-            Self::Raw(s) => unsafe {
-                matches!(
-                    *s.as_ptr(),
-                    b'-' | b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' | b'8' | b'9'
-                )
-            },
+            Self::Raw(s) => unsafe { matches!(*s.as_ptr(), b'-' | b'0'..=b'9') },
             _ => false,
         }
     }
@@ -337,11 +323,7 @@ impl<'a> Value<'a> {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&'a self, p: P) -> Option<Value<'a>>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer<P: IntoIterator<Item: JsonPointer>>(&'a self, p: P) -> Option<Value<'a>> {
         let src: &'a str = match self {
             Value::Raw(v) => v,
             Value::Object(v) => v.raw,
@@ -370,10 +352,14 @@ impl<'a> Value<'a> {
                 && char == b'{'
             {
                 loop {
+                    tmp.inc(1);
                     match tmp.skip_whitespace() {
                         b'"' => unsafe {
-                            let new = tmp.string_unchecked::<String, String, Error>();
+                            let new = tmp.parse_string_unchecked::<String, String>();
+
+                            tmp.inc(1);
                             tmp.skip_whitespace(); // skip ':'
+                            tmp.inc(1);
                             char = tmp.skip_whitespace();
 
                             if &*new == key {
@@ -397,6 +383,7 @@ impl<'a> Value<'a> {
                 && char == b'['
             {
                 loop {
+                    tmp.inc(1);
                     match tmp.skip_whitespace() {
                         b',' => continue,
                         b']' => return None,
@@ -429,7 +416,7 @@ impl<'a> Value<'a> {
 
 impl<'a> Parser<'a, &'a str> {
     #[inline]
-    pub(super) fn number_unchecked(&mut self) -> Number {
+    pub(super) unsafe fn parse_number_unchecked(&mut self) -> Number {
         let tmp = self.cur();
 
         let neg = tmp == b'-';
@@ -450,70 +437,6 @@ impl<'a> Parser<'a, &'a str> {
                     .unwrap_unchecked()
             },
         }
-    }
-}
-
-impl<'a, S: Source<Volatility = NonVolatile>> ValueBuilder<'a, S> for Value<'a> {
-    const LAZY: bool = true;
-    const CUSTOM_LITERAL: bool = false;
-
-    type Error = Error;
-    type Array = _Array;
-    type Object = _Object;
-    type String = _String;
-
-    #[inline]
-    fn literal(_: &[u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn integer(_: u64, _: bool) -> Self {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn float(_: f64) -> Self {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn bool(_: bool) -> Self {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn null() -> Self {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn raw(s: &'a [u8]) -> Self {
-        Self::Raw(Raw(unsafe { str::from_utf8_unchecked(s) }))
-    }
-
-    #[inline]
-    fn apply_span(&mut self, _: usize, _: usize) {}
-}
-
-impl<'a> Into<Value<'a>> for _Array {
-    #[inline]
-    fn into(self) -> Value<'a> {
-        unimplemented!()
-    }
-}
-
-impl<'a> Into<Value<'a>> for _Object {
-    #[inline]
-    fn into(self) -> Value<'a> {
-        unimplemented!()
-    }
-}
-
-impl<'a> Into<Value<'a>> for _String {
-    #[inline]
-    fn into(self) -> Value<'a> {
-        unimplemented!()
     }
 }
 

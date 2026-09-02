@@ -1,5 +1,5 @@
 use crate::{Parser, config::Config, misc::*, source::Source, value::builder::ErrorBuilder};
-use core::{hint::select_unpredictable, slice::from_raw_parts, str::from_utf8_unchecked};
+use core::{hint::cold_path, slice::from_raw_parts, str::from_utf8_unchecked};
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline]
@@ -14,7 +14,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline]
-    #[cfg(any(feature = "alloc", feature = "serde"))]
+    #[cfg(feature = "alloc")]
     pub(crate) fn skip_value_unchecked(&mut self) {
         match self.skip_whitespace() {
             b'"' => self.skip_string_unchecked(),
@@ -24,7 +24,9 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     pub(super) fn skip_object<E: ErrorBuilder>(&mut self) -> Result<(), E> {
+        self.inc(1);
         let mut tmp = self.skip_whitespace();
+
         if tmp == b'}' {
             return Ok(());
         }
@@ -35,14 +37,21 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             }
 
             self.skip_string()?;
+            self.inc(1);
+
             if self.skip_whitespace() != b':' {
                 break E::expected_colon();
             }
 
+            self.inc(1);
             self.skip_value()?;
+            self.inc(1);
             tmp = self.skip_whitespace();
+
             let comma = tmp == b',';
+
             if comma {
+                self.inc(1);
                 tmp = self.skip_whitespace();
             }
 
@@ -69,6 +78,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     pub(super) fn skip_array<E: ErrorBuilder>(&mut self) -> Result<(), E> {
+        self.inc(1);
         let mut tmp = self.skip_whitespace();
 
         if tmp == b']' {
@@ -83,10 +93,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 0 => return Err(E::eof()),
                 _ => unsafe { self.skip_literal() },
             }?;
+
+            self.inc(1);
             tmp = self.skip_whitespace();
+
             let comma = tmp == b',';
 
             if comma {
+                self.inc(1);
                 tmp = self.skip_whitespace();
             }
 
@@ -182,17 +196,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     }
 
     #[inline(never)]
-    unsafe fn skip_unicode_escape<'esc>(&mut self) -> bool {
+    unsafe fn skip_unicode_escape(&mut self) -> bool {
         self.inc(4);
         if !S::NULL_PADDED && self.idx() >= self.src.len() {
-            match S::NULL_PADDED {
-                true => self.cur.ptr = self.cur.ptr.sub(4),
-                _ => self.cur.idx = self.cur.idx.wrapping_sub(4),
-            }
+            self.dec(4);
             return false;
         }
 
-        let mut codepoint = match u16::from_str_radix(
+        let codepoint = match u16::from_str_radix(
             from_utf8_unchecked(from_raw_parts(self.cur_ptr().sub(3), 4)),
             16,
         ) {
@@ -200,15 +211,16 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             _ => return false,
         };
 
-        if (0xD800..=0xDBFF).contains(&codepoint) {
+        if (0xD800..=0xDFFF).contains(&codepoint) {
+            if codepoint >= 0xDC00 {
+                return false;
+            }
+
             self.inc(6);
             if !S::NULL_PADDED && self.idx() >= self.src.len()
                 || from_raw_parts(self.cur_ptr().sub(5), 2) != br"\u"
             {
-                match S::NULL_PADDED {
-                    true => self.cur.ptr = self.cur.ptr.sub(6),
-                    _ => self.cur.idx = self.cur.idx.wrapping_sub(6),
-                }
+                self.dec(6);
                 return false;
             }
 
@@ -223,14 +235,10 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             if !(0xDC00..=0xDFFF).contains(&low) {
                 return false;
             }
-
-            codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (low - 0xDC00));
         }
 
-        let mut buf = [0; 4];
-        char::from_u32(codepoint)
-            .map(|v| v.encode_utf8(&mut buf).as_bytes())
-            .is_some()
+        // `codepoint` <= 0x10FFFF (char::MAX) excluding `0xD800..=0xDFFF`
+        true
     }
 
     #[inline]
@@ -260,7 +268,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             let (val, is_int) = self.parse_u64();
 
             if is_int {
-                self.dec();
+                self.dec(1);
                 if !neg || val < 9223372036854775809 {
                     return Ok(());
                 }
@@ -277,47 +285,58 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                 };
             }
 
-            return Err(select_unpredictable(
-                *self.cur_ptr().sub(1) == b'.',
-                E::trailing_decimal(),
-                E::invalid_literal(),
-            ));
+            return Err(match *self.cur_ptr().sub(1) {
+                b'.' => E::trailing_decimal(),
+                _ => E::invalid_literal(),
+            });
         }
 
         self.inc(3);
-        let err = 'err: {
-            if S::NULL_PADDED || self.idx() < self.src.len() {
-                match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
-                    0x6c6c756e | 0x65757274 => {}
-                    0x736c6166
-                        if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
-                            && *self.cur_ptr().add(1) == b'e' =>
-                    {
-                        self.inc(1)
-                    }
-                    _ => break 'err E::invalid_literal(),
+        if S::NULL_PADDED || self.idx() < self.src.len() {
+            match self.cur_ptr().sub(3).cast::<u32>().read_unaligned() {
+                0x6c6c756e | 0x65757274 => return Ok(()),
+                0x736c6166
+                    if (S::NULL_PADDED || self.idx() + 1 != self.src.len())
+                        && *self.cur_ptr().add(1) == b'e' =>
+                {
+                    self.inc(1);
+                    return Ok(());
                 }
+                _ => {}
+            }
+        }
 
-                return Ok(());
-            } else {
-                break 'err E::invalid_literal();
-            };
-        };
-
-        return Err(err);
+        Err(E::invalid_literal())
     }
 
     pub(crate) fn skip_literal_unchecked(&mut self) {
+        pub const NON_LIT_LUT: [bool; 256] = {
+            let mut tmp = [false; 256];
+
+            tmp[b'{' as usize] = true;
+            tmp[b'}' as usize] = true;
+            tmp[b'[' as usize] = true;
+            tmp[b']' as usize] = true;
+            tmp[b'"' as usize] = true;
+            tmp[b',' as usize] = true;
+            tmp[b'/' as usize] = true;
+            tmp[b' ' as usize] = true;
+            tmp[b'\n' as usize] = true;
+            tmp[b'\t' as usize] = true;
+            tmp[b'\r' as usize] = true;
+            tmp[b'\0' as usize] = true;
+
+            tmp
+        };
+
         loop {
-            if !S::NULL_PADDED && self.idx() + 1 >= self.src.len()
-                || NON_LIT_LUT[self.cur() as usize]
-            {
-                return self.dec();
+            if NON_LIT_LUT[self.cur() as usize] {
+                return self.dec(1);
             }
 
             self.inc(1);
-            if self.simd_lit() {
-                return self.dec();
+            if !S::NULL_PADDED && self.idx() >= self.src.len() {
+                return self.dec(1);
             }
         }
     }

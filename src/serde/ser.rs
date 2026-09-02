@@ -11,12 +11,15 @@ use std::io::Write;
 pub type Result<T> = core::result::Result<T, Error>;
 
 /// JSON serializing structure.
-pub struct Serializer<W: Write, F: Format>(W, F);
+pub struct Serializer<W: Write, F: Format> {
+    writer: W,
+    format: F,
+}
 
 impl<W: Write, F: Format> Serializer<W, F> {
     #[inline(always)]
-    pub(super) fn write(&mut self, v: char) -> Result<()> {
-        match self.0.write(&[v as _]) {
+    pub(super) fn write(&mut self, v: u8) -> Result<()> {
+        match self.writer.write_all(&[v]) {
             Ok(_) => Ok(()),
             _ => Err(Error),
         }
@@ -24,7 +27,7 @@ impl<W: Write, F: Format> Serializer<W, F> {
 
     #[inline(always)]
     pub(super) fn write_n(&mut self, v: &[u8]) -> Result<()> {
-        match self.0.write(v) {
+        match self.writer.write_all(v) {
             Ok(_) => Ok(()),
             _ => Err(Error),
         }
@@ -32,15 +35,14 @@ impl<W: Write, F: Format> Serializer<W, F> {
 
     #[inline(always)]
     fn comma(&mut self, flag: &mut bool) -> Result<()> {
-        match *flag {
-            true => match self.0.write(b",") {
+        if *flag {
+            match self.writer.write_all(b",") {
                 Ok(_) => Ok(()),
                 _ => Err(Error),
-            },
-            _ => {
-                *flag = true;
-                Ok(())
             }
+        } else {
+            *flag = true;
+            Ok(())
         }
     }
 }
@@ -58,10 +60,7 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
 
     #[inline]
     fn serialize_bool(self, v: bool) -> Result<()> {
-        self.write_n(match v {
-            true => b"true",
-            _ => b"false",
-        })
+        self.write_n(if v { b"true" } else { b"false" })
     }
 
     #[inline]
@@ -103,29 +102,25 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
     }
 
     fn serialize_f32(self, v: f32) -> Result<()> {
-        match match v.is_finite() {
-            true => {
-                let mut tmp = zmij::Buffer::new();
-                self.0.write(tmp.format_finite(v).as_bytes())
-            }
-            _ => self.0.write(b"null"),
-        } {
-            Ok(_) => Ok(()),
-            _ => Err(Error),
-        }
+        let mut tmp;
+
+        self.write_n(if v.is_finite() {
+            tmp = zmij::Buffer::new();
+            tmp.format_finite(v).as_bytes()
+        } else {
+            b"null"
+        })
     }
 
     fn serialize_f64(self, v: f64) -> Result<()> {
-        match match v.is_finite() {
-            true => {
-                let mut tmp = zmij::Buffer::new();
-                self.0.write(tmp.format_finite(v).as_bytes())
-            }
-            _ => self.0.write(b"null"),
-        } {
-            Ok(_) => Ok(()),
-            _ => Err(Error),
-        }
+        let mut tmp;
+
+        self.write_n(if v.is_finite() {
+            tmp = zmij::Buffer::new();
+            tmp.format_finite(v).as_bytes()
+        } else {
+            b"null"
+        })
     }
 
     #[inline]
@@ -155,15 +150,13 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
         };
         const CTRL: [u8; 64] = *b"000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F";
 
-        self.write('"')?;
+        self.write(b'"')?;
         if v.len() <= 8 {
             let mut rem = v.len();
             loop {
                 if rem == 0 {
-                    if self.0.write(v.as_bytes()).is_err() {
-                        return Err(Error);
-                    }
-                    return self.write('"');
+                    self.write_n(v.as_bytes())?;
+                    return self.write(b'"');
                 }
 
                 if unsafe { ESC[*v.as_bytes().get_unchecked(v.len() - rem) as usize] != 0 } {
@@ -188,42 +181,32 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
 
             let cur = tmp.cur();
             let esc = ESC[cur as usize];
+
             if esc == 0 {
                 continue;
             }
 
-            if unsafe {
-                let tmp = v.get_unchecked(offset..tmp.idx()).as_bytes();
-                self.0.write(tmp).is_err()
-            } {
-                return Err(Error);
-            }
-
+            unsafe { self.write_n(v.get_unchecked(offset..tmp.idx()).as_bytes())? }
             offset = tmp.idx() + 1;
-            let req = if esc != b'u' {
-                self.0.write(&[b'\\', esc])
+
+            if esc != b'u' {
+                self.write_n(&[b'\\', esc])
             } else {
                 unsafe {
                     let esc = CTRL.as_ptr().add(cur as usize * 2);
                     let seq = [b'\\', b'u', b'0', b'0', *esc, *esc.add(1)];
 
-                    self.0.write(&seq)
+                    self.write_n(&seq)
                 }
-            };
-
-            if req.is_err() {
-                return Err(Error);
-            }
+            }?
         }
 
-        if unsafe { self.0.write(v.get_unchecked(offset..).as_bytes()).is_err() } {
-            return Err(Error);
-        }
-        self.write('"')
+        unsafe { self.write_n(v.get_unchecked(offset..).as_bytes())? }
+        self.write(b'"')
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
-        self.write('[')?;
+        self.write(b'[')?;
         let mut flag = false;
 
         for &v in v {
@@ -231,7 +214,7 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
             self.write_n(itoa::Buffer::new().format(v).as_bytes())?;
         }
 
-        self.write(']')
+        self.write(b']')
     }
 
     #[inline]
@@ -274,16 +257,16 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
         variant: &'static str,
         value: &T,
     ) -> Result<()> {
-        self.write('{')?;
+        self.write(b'{')?;
         self.serialize_str(variant)?;
-        self.write(':')?;
+        self.write(b':')?;
         value.serialize(&mut *self)?;
-        self.write('}')
+        self.write(b'}')
     }
 
     fn serialize_seq(self, _: Option<usize>) -> Result<Container<'a, W, F>> {
-        self.write('[')?;
-        self.1.inc();
+        self.write(b'[')?;
+        self.format.inc();
         Ok(Container {
             ser: self,
             flag: false,
@@ -307,15 +290,15 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
         variant: &'static str,
         len: usize,
     ) -> Result<Container<'a, W, F>> {
-        self.write('{')?;
+        self.write(b'{')?;
         self.serialize_str(variant)?;
-        self.write(':')?;
+        self.write(b':')?;
         self.serialize_seq(Some(len))
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Container<'a, W, F>> {
-        self.write('{')?;
-        self.1.inc();
+        self.write(b'{')?;
+        self.format.inc();
         Ok(Container {
             ser: self,
             flag: false,
@@ -334,9 +317,9 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
         variant: &'static str,
         len: usize,
     ) -> Result<Container<'a, W, F>> {
-        self.write('{')?;
+        self.write(b'{')?;
         self.serialize_str(variant)?;
-        self.write(':')?;
+        self.write(b':')?;
         self.serialize_map(Some(len))
     }
 }
@@ -353,17 +336,17 @@ impl<W: Write, F: Format> SerializeSeq for Container<'_, W, F> {
 
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         self.ser.comma(&mut self.flag)?;
-        self.ser.1.indent(&mut self.ser.0)?;
+        self.ser.format.indent(&mut self.ser.writer)?;
         value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        self.ser.1.dec();
+        self.ser.format.dec();
         if self.flag {
-            self.ser.1.indent(&mut self.ser.0)?
+            self.ser.format.indent(&mut self.ser.writer)?
         }
-        self.ser.write(']')
+        self.ser.write(b']')
     }
 }
 
@@ -408,7 +391,7 @@ impl<W: Write, F: Format> SerializeTupleVariant for Container<'_, W, F> {
 
     #[inline]
     fn end(self) -> Result<()> {
-        match self.ser.0.write(b"]}") {
+        match self.ser.writer.write(b"]}") {
             Ok(_) => Ok(()),
             _ => Err(Error),
         }
@@ -421,23 +404,23 @@ impl<W: Write, F: Format> SerializeMap for Container<'_, W, F> {
 
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
         self.ser.comma(&mut self.flag)?;
-        self.ser.1.indent(&mut self.ser.0)?;
+        self.ser.format.indent(&mut self.ser.writer)?;
         key.serialize(MapKey(self.ser))
     }
 
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
-        self.ser.write(':')?;
-        self.ser.1.sep(&mut self.ser.0)?;
+        self.ser.write(b':')?;
+        self.ser.format.sep(&mut self.ser.writer)?;
         value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        self.ser.1.dec();
+        self.ser.format.dec();
         if self.flag {
-            self.ser.1.indent(&mut self.ser.0)?
+            self.ser.format.indent(&mut self.ser.writer)?
         }
-        self.ser.write('}')
+        self.ser.write(b'}')
     }
 }
 
@@ -473,7 +456,7 @@ impl<W: Write, F: Format> SerializeStructVariant for Container<'_, W, F> {
     }
 
     fn end(self) -> Result<()> {
-        match self.ser.0.write(b"}}") {
+        match self.ser.writer.write(b"}}") {
             Ok(_) => Ok(()),
             _ => Err(Error),
         }
@@ -518,9 +501,9 @@ impl<W: Write, F: Format> ser::Serializer for MapKey<'_, W, F> {
     }
 
     fn serialize_i64(self, v: i64) -> Result<()> {
-        self.0.write('"')?;
+        self.0.write(b'"')?;
         self.0.write_n(itoa::Buffer::new().format(v).as_bytes())?;
-        self.0.write('"')
+        self.0.write(b'"')
     }
 
     #[inline]
@@ -539,13 +522,13 @@ impl<W: Write, F: Format> ser::Serializer for MapKey<'_, W, F> {
     }
 
     fn serialize_u64(self, v: u64) -> Result<()> {
-        self.0.write('"')?;
+        self.0.write(b'"')?;
         self.0.write_n(itoa::Buffer::new().format(v).as_bytes())?;
-        self.0.write('"')
+        self.0.write(b'"')
     }
 
     fn serialize_f32(self, v: f32) -> Result<()> {
-        self.0.write('"')?;
+        self.0.write(b'"')?;
         if let Err(_) = match v.is_finite() {
             true => {
                 let mut tmp = zmij::Buffer::new();
@@ -555,11 +538,11 @@ impl<W: Write, F: Format> ser::Serializer for MapKey<'_, W, F> {
         } {
             return Err(Error);
         }
-        self.0.write('"')
+        self.0.write(b'"')
     }
 
     fn serialize_f64(self, v: f64) -> Result<()> {
-        self.0.write('"')?;
+        self.0.write(b'"')?;
         if let Err(_) = match v.is_finite() {
             true => {
                 let mut tmp = zmij::Buffer::new();
@@ -569,7 +552,7 @@ impl<W: Write, F: Format> ser::Serializer for MapKey<'_, W, F> {
         } {
             return Err(Error);
         }
-        self.0.write('"')
+        self.0.write(b'"')
     }
 
     #[inline]
@@ -706,7 +689,10 @@ impl core::error::Error for Error {}
 #[inline]
 pub fn to_vec<T: Serialize>(v: T) -> Result<Vec<u8>> {
     let mut tmp = Vec::new();
-    v.serialize(&mut Serializer(&mut tmp, Compact))?;
+    v.serialize(&mut Serializer {
+        writer: &mut tmp,
+        format: Compact,
+    })?;
     Ok(tmp)
 }
 
@@ -718,7 +704,10 @@ pub fn to_vec<T: Serialize>(v: T) -> Result<Vec<u8>> {
 #[inline]
 pub fn to_vec_pretty<T: Serialize>(v: T) -> Result<Vec<u8>> {
     let mut tmp = Vec::new();
-    v.serialize(&mut Serializer(&mut tmp, Pretty::new()))?;
+    v.serialize(&mut Serializer {
+        writer: &mut tmp,
+        format: Pretty::new(),
+    })?;
     Ok(tmp)
 }
 
@@ -730,7 +719,12 @@ pub fn to_vec_pretty<T: Serialize>(v: T) -> Result<Vec<u8>> {
 #[inline]
 pub fn to_string<T: Serialize>(v: T) -> Result<String> {
     let mut tmp = String::new();
-    unsafe { v.serialize(&mut Serializer(tmp.as_mut_vec(), Compact))? }
+    unsafe {
+        v.serialize(&mut Serializer {
+            writer: tmp.as_mut_vec(),
+            format: Compact,
+        })?
+    }
     Ok(tmp)
 }
 
@@ -742,7 +736,12 @@ pub fn to_string<T: Serialize>(v: T) -> Result<String> {
 #[inline]
 pub fn to_string_pretty<T: Serialize>(v: T) -> Result<String> {
     let mut tmp = String::new();
-    unsafe { v.serialize(&mut Serializer(tmp.as_mut_vec(), Pretty::new()))? }
+    unsafe {
+        v.serialize(&mut Serializer {
+            writer: tmp.as_mut_vec(),
+            format: Pretty::new(),
+        })?
+    }
     Ok(tmp)
 }
 
@@ -753,8 +752,11 @@ pub fn to_string_pretty<T: Serialize>(v: T) -> Result<String> {
 /// Returns error if `T`'s `Serialize` implementation fails, `T` contains
 /// non-string map keys, or an I/O error occurs while writing.
 #[inline]
-pub fn to_writer<W: Write, T: Serialize>(w: W, v: T) -> Result<()> {
-    v.serialize(&mut Serializer(w, Compact))
+pub fn to_writer<T: Serialize>(w: impl Write, v: T) -> Result<()> {
+    v.serialize(&mut Serializer {
+        writer: w,
+        format: Compact,
+    })
 }
 
 /// Serializes the given data into the provided writer as a pretty-printed JSON.
@@ -764,6 +766,9 @@ pub fn to_writer<W: Write, T: Serialize>(w: W, v: T) -> Result<()> {
 /// Returns error if `T`'s `Serialize` implementation fails, `T` contains
 /// non-string map keys, or an I/O error occurs while writing.
 #[inline]
-pub fn to_writer_pretty<W: Write, T: Serialize>(w: W, v: T) -> Result<()> {
-    v.serialize(&mut Serializer(w, Pretty::new()))
+pub fn to_writer_pretty<T: Serialize>(w: impl Write, v: T) -> Result<()> {
+    v.serialize(&mut Serializer {
+        writer: w,
+        format: Pretty::new(),
+    })
 }

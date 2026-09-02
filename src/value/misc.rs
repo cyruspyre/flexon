@@ -37,17 +37,11 @@ macro_rules! define_value {
 
         impl<$($name_lt,)? S: Source $(< Volatility = crate::source::$volatility >)?> ValueBuilder<$lt, S> for $name $(<$name_lt>)? {
             const LAZY: bool = false;
-            const CUSTOM_LITERAL: bool = false;
 
             type Error = Error;
             type Array = Array<Self>;
             type Object = Object<$str, Self>;
             type String = $str;
-
-            #[inline]
-            fn literal(_: &[u8]) -> Result<Self, Self::Error> {
-                unimplemented!()
-            }
 
             #[inline]
             fn integer(val: u64, neg: bool) -> Self {
@@ -149,103 +143,6 @@ macro_rules! string_impl {
 
     ($type:ty, $lt:lifetime $(,$volatility:ty)?) => {
         use core::fmt::{self, Debug, Display, Formatter};
-
-        impl<$lt, S: crate::source::Source$(< Volatility = $volatility >)?> ValueBuilder<$lt, S> for $type {
-            const LAZY: bool = false;
-            const CUSTOM_LITERAL: bool = true;
-
-            type Error = Error;
-            type Array = Self;
-            type Object = Self;
-            type String = Self;
-
-            #[inline]
-            fn literal(_: &[u8]) -> Result<Self, Self::Error> {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn integer(_: u64, _: bool) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn float(_: f64) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn bool(_: bool) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn null() -> Self {
-                unimplemented!()
-            }
-
-            #[inline(always)]
-            fn raw(_: &[u8]) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn apply_span(&mut self, _: usize, _: usize) {}
-        }
-
-        impl<$lt> ArrayBuilder<Self> for $type {
-            #[inline]
-            fn new() -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn with_capacity(_: usize) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn len(&self) -> usize {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn on_value(&mut self, _: Self) {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn on_complete(&mut self) {
-                unimplemented!()
-            }
-        }
-
-        impl<$lt, K, V> ObjectBuilder<K, V> for $type {
-            #[inline]
-            fn new() -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn with_capacity(_: usize) -> Self {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn len(&self) -> usize {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn on_value(&mut self, _: K, _: V) {
-                unimplemented!()
-            }
-
-            #[inline]
-            fn on_complete(&mut self) {
-                unimplemented!()
-            }
-        }
 
         impl<$lt> PartialEq for $type {
             #[inline]

@@ -9,7 +9,7 @@ use crate::{
 };
 use core::hint::unreachable_unchecked;
 
-// ehh... used in the string matching functions below to just keep
+// used in the string matching functions below to just keep
 // reading and make their subsequent matches invalid once invalidated.
 //
 // INVALID[0]: start points here on mismatch, so it stays mismatched forever.
@@ -41,11 +41,9 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub fn skip_to<E, P>(&mut self, p: P) -> Result<(), E>
     where
         E: ErrorBuilder,
-        P: IntoIterator,
-        P::Item: JsonPointer,
+        P: IntoIterator<Item: JsonPointer>,
     {
         self._skip_to(p)?;
-        self.dec_if_not_empty();
         Ok(())
     }
 
@@ -53,18 +51,21 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub(crate) fn _skip_to<E, P>(&mut self, p: P) -> Result<u8, E>
     where
         E: ErrorBuilder,
-        P: IntoIterator,
-        P::Item: JsonPointer,
+        P: IntoIterator<Item: JsonPointer>,
     {
         let mut char = self.skip_whitespace();
 
         'main: for pointer in p {
+            #[cfg(feature = "span")]
+            let mut err_idx = usize::MAX;
             #[allow(unused_mut)]
             let mut err = if let Some(key) = pointer.as_key()
                 && char == b'{'
             {
                 #[cfg(feature = "span")]
                 let start = self.idx();
+
+                self.inc(1);
                 char = self.skip_whitespace();
 
                 if char == b'}' {
@@ -81,11 +82,15 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     }
 
                     let matches = unsafe { self.string_match(key)? };
+
+                    self.inc(1);
                     if self.skip_whitespace() != b':' {
                         break E::expected_colon();
                     }
 
+                    self.inc(1);
                     char = self.skip_whitespace();
+
                     if matches {
                         continue 'main;
                     }
@@ -97,9 +102,15 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         _ => unsafe { self.skip_literal() },
                     }?;
 
+                    self.inc(1);
                     char = self.skip_whitespace();
+
+                    #[cfg(feature = "span")]
+                    let comma_idx = self.idx();
                     let comma = char == b',';
+
                     if comma {
+                        self.inc(1);
                         char = self.skip_whitespace();
                     }
 
@@ -112,7 +123,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                             return Err(tmp);
                         } else {
                             #[cfg(feature = "span")]
-                            self.dec();
+                            (err_idx = comma_idx);
                             break E::trailing_comma();
                         }
                     }
@@ -131,6 +142,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             {
                 #[cfg(feature = "span")]
                 let start = self.idx();
+
+                self.inc(1);
                 char = self.skip_whitespace();
 
                 if char == b']' {
@@ -154,9 +167,15 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         _ => unsafe { self.skip_literal() },
                     }?;
 
+                    self.inc(1);
                     char = self.skip_whitespace();
+
+                    #[cfg(feature = "span")]
+                    let comma_idx = self.idx();
                     let comma = char == b',';
+
                     if comma {
+                        self.inc(1);
                         char = self.skip_whitespace();
                     }
 
@@ -169,7 +188,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                             return Err(tmp);
                         } else {
                             #[cfg(feature = "span")]
-                            self.dec();
+                            (err_idx = comma_idx);
                             break E::trailing_comma();
                         }
                     }
@@ -191,7 +210,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             };
 
             #[cfg(feature = "span")]
-            err.apply_span(self.idx(), self.idx());
+            {
+                if err_idx == usize::MAX {
+                    err_idx = self.idx()
+                }
+
+                err.apply_span(err_idx, err_idx)
+            }
+
             return Err(err);
         }
 
@@ -238,7 +264,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     }
 
                     if cur == b'u'
-                        && let Some(esc) = self.unicode_escape(&mut [0; 4])
+                        && let Some(esc) = self.parse_unicode_escape(&mut [0; 4])
                     {
                         for &v in esc {
                             start = match start != end && *start == v {
@@ -275,29 +301,29 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
     ///
     /// Same as [`Parser::skip_to`] but if the JSON is invalid or
     /// the path does not exist, then there is no guarantee of this function.
-    pub unsafe fn skip_to_unchecked<P>(&mut self, p: P)
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub unsafe fn skip_to_unchecked<P: IntoIterator<Item: JsonPointer>>(&mut self, p: P) {
         self._skip_to_unchecked(p);
-        self.dec();
     }
 
     #[inline(always)]
-    pub(crate) unsafe fn _skip_to_unchecked<P>(&mut self, p: P) -> u8
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub(crate) unsafe fn _skip_to_unchecked<P: IntoIterator<Item: JsonPointer>>(
+        &mut self,
+        p: P,
+    ) -> u8 {
         let mut char = self.skip_whitespace();
 
         'main: for pointer in p {
             if let Some(key) = pointer.as_key() {
                 loop {
+                    self.inc(1);
                     self.skip_whitespace(); // skip '"'
+
                     let matches = self.string_match_unchecked(key);
+
+                    self.inc(1);
                     self.skip_whitespace(); // skip ':'
+
+                    self.inc(1);
                     char = self.skip_whitespace();
 
                     if matches {
@@ -309,6 +335,8 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
                         b'{' | b'[' => self.skip_container_unchecked(),
                         _ => self.skip_literal_unchecked(),
                     }
+
+                    self.inc(1);
                     self.skip_whitespace(); // skip ','
                 }
             }
@@ -318,7 +346,9 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
             };
 
             loop {
+                self.inc(1);
                 char = self.skip_whitespace();
+
                 if idx == 0 {
                     continue 'main;
                 }
@@ -329,6 +359,8 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
                     b'{' | b'[' => self.skip_container_unchecked(),
                     _ => self.skip_literal_unchecked(),
                 }
+
+                self.inc(1);
                 self.skip_whitespace(); // skip ','
             }
         }
@@ -360,7 +392,7 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
                     }
 
                     let mut tmp = [0; 4];
-                    let esc = self.unicode_escape(&mut tmp).unwrap_unchecked();
+                    let esc = self.parse_unicode_escape(&mut tmp).unwrap_unchecked();
 
                     for &v in esc {
                         start = match start != end && *start == v {

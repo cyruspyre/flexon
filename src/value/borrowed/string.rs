@@ -1,5 +1,4 @@
 use crate::{
-    Error,
     misc::{capacity_overflow, likely},
     source::{NonVolatile, Source},
     value::{builder::*, misc::string_impl, owned},
@@ -45,14 +44,7 @@ impl<'a> String<'a> {
     }
 }
 
-impl<'a, S, E> StringBuilder<'a, S, E> for String<'a>
-where
-    S: Source<Volatility = NonVolatile>,
-    E: ErrorBuilder,
-{
-    const REJECT_CTRL_CHAR: bool = true;
-    const REJECT_INVALID_ESCAPE: bool = true;
-
+impl<'a, S: Source<Volatility = NonVolatile>> StringBuilder<'a, S> for String<'a> {
     #[inline]
     fn new() -> Self {
         Self(Inner::Heap {
@@ -145,11 +137,6 @@ where
 
     #[inline]
     fn apply_span(&mut self, _: usize, _: usize) {}
-
-    #[inline]
-    fn on_complete(&mut self, _: &'a [u8]) -> Result<(), E> {
-        Ok(())
-    }
 }
 
 string_impl!(String<'a>, 'a);

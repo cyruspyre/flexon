@@ -1,5 +1,4 @@
 use crate::{
-    Error,
     misc::{capacity_overflow, likely},
     source::Source,
     value::{builder::*, misc::string_impl},
@@ -39,14 +38,7 @@ impl String {
     }
 }
 
-impl<S, E> StringBuilder<'_, S, E> for String
-where
-    S: Source,
-    E: ErrorBuilder,
-{
-    const REJECT_CTRL_CHAR: bool = true;
-    const REJECT_INVALID_ESCAPE: bool = true;
-
+impl<S: Source> StringBuilder<'_, S> for String {
     #[inline]
     fn new() -> Self {
         Self(Inner::Heap {
@@ -146,11 +138,6 @@ where
 
     #[inline]
     fn apply_span(&mut self, _: usize, _: usize) {}
-
-    #[inline]
-    fn on_complete(&mut self, _: &[u8]) -> Result<(), E> {
-        Ok(())
-    }
 }
 
 string_impl!(String);

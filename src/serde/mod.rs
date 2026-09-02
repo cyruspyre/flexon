@@ -1,7 +1,6 @@
 //! serde specific API.
 
 pub mod de;
-mod unchecked;
 mod value;
 
 #[cfg(feature = "std")]
@@ -14,7 +13,7 @@ mod span;
 #[doc(inline)]
 pub use de::{
     from_mut_slice, from_mut_slice_unchecked, from_mut_str, from_slice, from_slice_unchecked,
-    from_str, get_from, get_from_unchecked, get_with_parser, get_with_parser_unchecked,
+    from_str, get_from, get_with_parser,
 };
 
 #[doc(inline)]

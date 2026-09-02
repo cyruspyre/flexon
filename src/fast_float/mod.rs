@@ -1,4 +1,4 @@
-// from `fast-float2` at commit `d4f5749`
+// from `fast-float2` at commit `dece2b1`
 
 mod binary;
 mod common;
@@ -41,11 +41,12 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 exponent = (tmp as i64).wrapping_neg();
                 n_digits += tmp;
 
-                if self.idx() != self.src.len() {
-                    match self.cur() {
-                        b'e' | b'E' => exp_number = self.parse_scientific()?,
-                        _ => self.dec(),
-                    }
+                if (S::NULL_PADDED || self.idx() < self.src.len())
+                    && matches!(self.cur(), b'e' | b'E')
+                {
+                    exp_number = self.parse_scientific()?
+                } else {
+                    self.dec(1)
                 }
             }
             b'e' | b'E' => exp_number = self.parse_scientific()?,
@@ -107,7 +108,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 exponent += exp_number; // add back the explicit part
             }
 
-            self.dec();
+            self.dec(1);
             Number {
                 exponent,
                 mantissa,
@@ -154,20 +155,19 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         }
 
         while S::NULL_PADDED || self.idx() != self.src.len() {
-            let tmp = self.cur();
-            if tmp < b'0' || tmp > b'9' {
+            let tmp @ ..10 = self.cur().wrapping_sub(b'0') else {
                 break;
-            }
+            };
 
             if num < 0x10000 {
-                num = num * 10 + (tmp - b'0') as i64;
+                num = num * 10 + tmp as i64;
             }
 
             flag = true;
             self.inc(1);
         }
 
-        self.dec();
+        self.dec(1);
         if flag {
             Some(if neg { -num } else { num })
         } else {

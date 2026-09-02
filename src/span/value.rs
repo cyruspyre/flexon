@@ -179,11 +179,7 @@ impl<S: Deref<Target = str>> GenericValue<S> {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&self, p: P) -> Option<&GenericValue<S>>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer<P: IntoIterator<Item: JsonPointer>>(&self, p: P) -> Option<&GenericValue<S>> {
         let mut tmp = self;
 
         for pointer in p {
@@ -199,11 +195,10 @@ impl<S: Deref<Target = str>> GenericValue<S> {
     }
 
     /// Looks up a value by the given path and returns a mutable reference.
-    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut GenericValue<S>>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer_mut<P: IntoIterator<Item: JsonPointer>>(
+        &mut self,
+        p: P,
+    ) -> Option<&mut GenericValue<S>> {
         let mut tmp = self;
 
         for pointer in p {
@@ -235,11 +230,10 @@ impl<S: Deref<Target = str>> Span<GenericValue<S>> {
     ///
     /// # Ok::<_, flexon::Error>(())
     /// ```
-    pub fn pointer<P>(&self, p: P) -> Option<&Span<GenericValue<S>>>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer<P: IntoIterator<Item: JsonPointer>>(
+        &self,
+        p: P,
+    ) -> Option<&Span<GenericValue<S>>> {
         let mut tmp = self;
 
         for pointer in p {
@@ -254,11 +248,10 @@ impl<S: Deref<Target = str>> Span<GenericValue<S>> {
     }
 
     /// Looks up a value by the given path and returns a mutable reference.
-    pub fn pointer_mut<P>(&mut self, p: P) -> Option<&mut Span<GenericValue<S>>>
-    where
-        P: IntoIterator,
-        P::Item: JsonPointer,
-    {
+    pub fn pointer_mut<P: IntoIterator<Item: JsonPointer>>(
+        &mut self,
+        p: P,
+    ) -> Option<&mut Span<GenericValue<S>>> {
         let mut tmp = self;
 
         for pointer in p {
@@ -306,20 +299,14 @@ impl<S: Deref<Target = str>> Index<&str> for GenericValue<S> {
 impl<'a, S, V> ValueBuilder<'a, S> for Span<GenericValue<V>>
 where
     S: Source,
-    V: StringBuilder<'a, S, Span<Error>>,
+    V: StringBuilder<'a, S>,
 {
     const LAZY: bool = false;
-    const CUSTOM_LITERAL: bool = false;
 
     type Error = Span<Error>;
     type Array = Array<Span<GenericValue<V>>>;
     type Object = Object<Span<V>, Span<GenericValue<V>>>;
     type String = Span<V>;
-
-    #[inline]
-    fn literal(_: &[u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
-    }
 
     #[inline]
     fn integer(val: u64, neg: bool) -> Self {
