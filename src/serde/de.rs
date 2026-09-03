@@ -20,7 +20,7 @@ use simdutf8::basic::from_utf8;
 
 #[cfg(feature = "alloc")]
 use {
-    crate::{misc::capacity_overflow, source::NullPadded},
+    crate::misc::capacity_overflow,
     alloc::{
         alloc::{alloc, dealloc, handle_alloc_error, realloc},
         boxed::Box,
@@ -254,7 +254,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             len += count;
                             let tmp = from_raw_parts(start, len);
 
-                            return if S::UTF8 || from_utf8(tmp).is_ok() {
+                            return if Parser::<S, C>::PRE_VALIDATED_UTF8 || from_utf8(tmp).is_ok() {
                                 visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
                             } else {
                                 Err(self.err(Kind::UnexpectedToken))
@@ -432,7 +432,9 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                 buf.add(len)
                     .copy_from_nonoverlapping(self.src.ptr(offset), count);
 
-                if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
+                if Parser::<S, C>::PRE_VALIDATED_UTF8
+                    || from_utf8(from_raw_parts(buf, new_len)).is_ok()
+                {
                     return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
                 }
 
@@ -548,7 +550,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
                 if len == 0 {
                     let tmp = from_raw_parts(offset, self.cur_ptr().offset_from_unsigned(offset));
-                    return if S::UTF8 || from_utf8(tmp).is_ok() {
+                    return if Parser::<S, C>::PRE_VALIDATED_UTF8 || from_utf8(tmp).is_ok() {
                         visitor.visit_borrowed_str(from_utf8_unchecked(tmp))
                     } else {
                         Err(self.err(Kind::UnexpectedToken))
@@ -577,7 +579,9 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
                 buf.add(len).copy_from_nonoverlapping(offset, count);
 
-                if S::UTF8 || from_utf8(from_raw_parts(buf, new_len)).is_ok() {
+                if Parser::<S, C>::PRE_VALIDATED_UTF8
+                    || from_utf8(from_raw_parts(buf, new_len)).is_ok()
+                {
                     return visitor.visit_string(String::from_raw_parts(buf, new_len, cap));
                 }
 
@@ -1340,22 +1344,29 @@ pub unsafe fn from_mut_slice_unchecked<'a, T: Deserialize<'a>>(s: &'a mut [u8]) 
     T::deserialize(&mut Parser::from_mut_slice_unchecked(s))
 }
 
-/// Deserializes specified type from null padded JSON input.
+/// Deserializes specified type from the provided source.
 ///
-/// Same as [`from_str`] and will not perform UTF-8 validation.
-#[inline]
-#[cfg(feature = "alloc")]
-pub fn from_null_padded<'a, T: Deserialize<'a>>(buf: &'a NullPadded) -> Result<T> {
-    T::deserialize(&mut Parser::new(buf))
-}
-
-/// Deserializes specified type from null padded JSON input.
+/// # Errors
+/// Returns an error if the JSON is malformed or cannot be deserialized into type `T`.
 ///
-/// Same as [`from_mut_str`] and will not perform UTF-8 validation.
+/// # Example
+/// ```
+/// # use flexon::source::NullPadded;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Book {
+///     name: String,
+///     pages: u32,
+/// }
+///
+/// let src = NullPadded::from_bytes(br#"{"name": "idk", "pages": 256}"#);
+/// let book: Book = flexon::from_source(&src)?;
+/// # Ok::<(), flexon::serde::de::Error>(())
+/// ```
 #[inline]
-#[cfg(feature = "alloc")]
-pub fn from_mut_null_padded<'a, T: Deserialize<'a>>(buf: &'a mut NullPadded) -> Result<T> {
-    T::deserialize(&mut Parser::new(buf))
+pub fn from_source<'a, T: Deserialize<'a>>(src: impl Source + 'a) -> Result<T> {
+    T::deserialize(&mut Parser::new(src))
 }
 
 /// Deserializes specified type from a streaming source.

@@ -39,12 +39,8 @@ pub use value::{LazyValue, OwnedValue, Value};
 #[cfg(feature = "serde")]
 pub use serde::de::{
     from_mut_slice, from_mut_slice_unchecked, from_mut_str, from_slice, from_slice_unchecked,
-    from_str,
+    from_source, from_str, get_from,
 };
-
-#[doc(inline)]
-#[cfg(all(feature = "serde", feature = "alloc"))]
-pub use serde::de::{from_mut_null_padded, from_null_padded, get_from};
 
 #[doc(inline)]
 #[cfg(all(feature = "serde", feature = "std"))]

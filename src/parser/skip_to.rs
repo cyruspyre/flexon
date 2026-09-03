@@ -240,7 +240,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             break match self.cur() {
                 b'"' => {
-                    if !S::UTF8 && utf8.is_expecting() {
+                    if !Self::PRE_VALIDATED_UTF8 && utf8.is_expecting() {
                         break E::unexpected_token();
                     }
 
@@ -278,7 +278,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     E::invalid_escape()
                 }
                 v @ 0x20.. => {
-                    if !S::UTF8 && utf8.advance(v) {
+                    if !Self::PRE_VALIDATED_UTF8 && utf8.advance(v) {
                         break E::unexpected_token();
                     }
 

@@ -5,6 +5,9 @@ use crate::misc::Sealed;
 /// Configuration trait for JSON parsing behavior.
 pub trait Config: Sealed {
     #[doc(hidden)]
+    const PRE_VALIDATE_UTF8: bool;
+
+    #[doc(hidden)]
     fn comma(&self) -> bool;
 
     #[doc(hidden)]
@@ -65,6 +68,8 @@ impl RTConfig {
 }
 
 impl Config for RTConfig {
+    const PRE_VALIDATE_UTF8: bool = true;
+
     #[inline(always)]
     fn comma(&self) -> bool {
         self.comma
@@ -86,8 +91,9 @@ impl Sealed for RTConfig {}
 
 /// Compile-time configuration for JSON parsing behavior.
 pub struct CTConfig<
-    const COMMA: bool = true,
+    const REQUIRE_COMMA: bool = true,
     const TRAILING_COMMA: bool = false,
+    const PRE_VALIDATE_UTF8: bool = true,
     #[cfg(feature = "comment")] const COMMENTS: bool = false,
 >;
 
@@ -100,11 +106,10 @@ impl CTConfig {
     }
 }
 
-impl<const A: bool, const B: bool> CTConfig<A, B> {
+impl<const A: bool, const B: bool, const C: bool> CTConfig<A, B, C> {
     /// Allows comments when parsing.
-    #[inline]
     #[cfg(feature = "comment")]
-    pub fn allow_comments(self) -> CTConfig<A, B, true> {
+    pub fn allow_comments(self) -> CTConfig<A, B, C, true> {
         CTConfig
     }
 }
@@ -114,33 +119,51 @@ impl<const A: bool, const B: bool> CTConfig<A, B> {
 mod __ {
     use super::{CTConfig, Config, Sealed};
 
-    impl<const A: bool, const B: bool> CTConfig<true, A, B> {
+    impl<const A: bool, const B: bool, const C: bool> CTConfig<true, A, B, C> {
         /// Makes commas optional. As a side effect trailing commas are allowed automatically.
-        #[inline]
-        pub fn optional_comma(self) -> CTConfig<false, true, B> {
+        pub fn optional_comma(self) -> CTConfig<false, true, B, C> {
             CTConfig
         }
     }
 
-    impl<const A: bool, const B: bool> CTConfig<A, false, B> {
+    impl<const A: bool, const B: bool, const C: bool> CTConfig<A, false, B, C> {
         /// Allows trailing commas when parsing.
-        #[inline]
-        pub fn allow_trailing_comma(self) -> CTConfig<A, true, B> {
+        pub fn allow_trailing_comma(self) -> CTConfig<A, true, B, C> {
             CTConfig
         }
     }
 
-    impl<const COMMA: bool, const TRAILING_COMMA: bool, const COMMENTS: bool> Config
-        for CTConfig<COMMA, TRAILING_COMMA, COMMENTS>
+    impl<const A: bool, const B: bool, const C: bool> CTConfig<A, B, true, C> {
+        /// Disables UTF-8 pre-validation, which would otherwise be performed eagerly when possible.
+        ///
+        /// Performing a single UTF-8 validation over the whole source is usually faster than doing it
+        /// for each JSON string that is parsed. However, it can be considered *overhead* when the JSON
+        /// has little to no strings.
+        ///
+        /// Without this, the default behavior is to pre-validate the entire source for UTF-8 when
+        /// the source is non-volatile and not guaranteed to be valid UTF-8 already.
+        pub fn disable_utf8_pre_validation(self) -> CTConfig<A, B, false, C> {
+            CTConfig
+        }
+    }
+
+    impl<
+        const REQUIRE_COMMA: bool,
+        const TRAILING_COMMA: bool,
+        const PRE_VALIDATE_UTF8: bool,
+        const COMMENTS: bool,
+    > Config for CTConfig<REQUIRE_COMMA, TRAILING_COMMA, PRE_VALIDATE_UTF8, COMMENTS>
     {
+        const PRE_VALIDATE_UTF8: bool = PRE_VALIDATE_UTF8;
+
         #[inline(always)]
         fn comma(&self) -> bool {
-            !COMMA
+            !REQUIRE_COMMA
         }
 
         #[inline(always)]
         fn trailing_comma(&self) -> bool {
-            TRAILING_COMMA | !COMMA
+            TRAILING_COMMA | !REQUIRE_COMMA
         }
 
         #[inline(always)]
@@ -149,40 +172,56 @@ mod __ {
         }
     }
 
-    impl<const A: bool, const B: bool, const C: bool> Sealed for CTConfig<A, B, C> {}
+    impl<const A: bool, const B: bool, const C: bool, const D: bool> Sealed for CTConfig<A, B, C, D> {}
 }
 
 #[cfg(not(feature = "comment"))]
 mod __ {
     use super::{CTConfig, Config, Sealed};
 
-    impl<const A: bool> CTConfig<true, A> {
+    impl<const A: bool, const B: bool> CTConfig<true, A, B> {
         /// Makes commas optional. As a side effect trailing commas are allowed automatically.
-        #[inline]
-        pub fn optional_comma(self) -> CTConfig<false, true> {
+        pub fn optional_comma(self) -> CTConfig<false, true, B> {
             CTConfig
         }
     }
 
-    impl<const V: bool> CTConfig<V> {
+    impl<const A: bool> CTConfig<true, false, A> {
         /// Allows trailing commas when parsing.
-        #[inline]
-        pub fn allow_trailing_comma(self) -> CTConfig<V, true> {
+        pub fn allow_trailing_comma(self) -> CTConfig<true, true, A> {
             CTConfig
         }
     }
 
-    impl<const COMMA: bool, const TRAILING_COMMA: bool> Config for CTConfig<COMMA, TRAILING_COMMA> {
+    impl<const A: bool, const B: bool> CTConfig<A, B, true> {
+        /// Disables UTF-8 pre-validation, which would otherwise be performed eagerly when possible.
+        ///
+        /// Performing a single UTF-8 validation over the whole source is usually faster than doing it
+        /// for each JSON string that is parsed. However, it can be considered *overhead* when the JSON
+        /// has little to no strings.
+        ///
+        /// Without this, the default behavior is to pre-validate the entire source for UTF-8 when
+        /// the source is non-volatile and not guaranteed to be valid UTF-8 already.
+        pub fn disable_utf8_pre_validation(self) -> CTConfig<A, B, false> {
+            CTConfig
+        }
+    }
+
+    impl<const REQUIRE_COMMA: bool, const TRAILING_COMMA: bool, const PRE_VALIDATE_UTF8: bool>
+        Config for CTConfig<REQUIRE_COMMA, TRAILING_COMMA, PRE_VALIDATE_UTF8>
+    {
+        const PRE_VALIDATE_UTF8: bool = PRE_VALIDATE_UTF8;
+
         #[inline(always)]
         fn comma(&self) -> bool {
-            !COMMA
+            !REQUIRE_COMMA
         }
 
         #[inline(always)]
         fn trailing_comma(&self) -> bool {
-            TRAILING_COMMA | !COMMA
+            TRAILING_COMMA | !REQUIRE_COMMA
         }
     }
 
-    impl<const A: bool, const B: bool> Sealed for CTConfig<A, B> {}
+    impl<const A: bool, const B: bool, const C: bool> Sealed for CTConfig<A, B, C> {}
 }

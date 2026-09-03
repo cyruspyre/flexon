@@ -46,6 +46,9 @@ union Cur {
 }
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
+    pub(crate) const PRE_VALIDATED_UTF8: bool =
+        S::UTF8 | !S::Volatility::IS_VOLATILE & C::PRE_VALIDATE_UTF8;
+
     /// Create a parser with the given source and configuration.
     ///
     /// # Example
@@ -71,6 +74,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             );
         }
 
+        let offset = if !S::UTF8 & !S::Volatility::IS_VOLATILE & C::PRE_VALIDATE_UTF8
+            && let Err(e) = unsafe { from_utf8(from_raw_parts(src.ptr(0), src.len())) }
+        {
+            e.valid_up_to()
+        } else {
+            0
+        };
+
         Self {
             #[cfg(feature = "prealloc")]
             prealloc: 0,
@@ -79,11 +90,11 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             cur: match S::NULL_PADDED {
                 true => Cur {
                     ptr: match S::INSITU {
-                        true => src.ptr_mut(0),
-                        _ => src.ptr(0).cast_mut(), // not actually mutating
+                        true => src.ptr_mut(offset),
+                        _ => src.ptr(offset).cast_mut(), // not actually mutating
                     },
                 },
-                _ => Cur { idx: 0 },
+                _ => Cur { idx: offset },
             },
             __: PhantomData,
             src,
@@ -417,7 +428,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let len = idx - offset - multi as usize * 2;
         let src = self.src.ptr(offset);
 
-        if S::UTF8 || unsafe { from_utf8(from_raw_parts(src, len)).is_ok() } {
+        if Self::PRE_VALIDATED_UTF8 || unsafe { from_utf8(from_raw_parts(src, len)).is_ok() } {
             self.comments.push(Comment::new(
                 src,
                 len,
@@ -688,7 +699,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         buf.on_final_chunk(from_raw_parts(self.src.ptr(offset), end - offset));
 
         let raw = from_raw_parts(self.src.ptr(start + 1), end - start - 1);
-        if !S::UTF8 {
+        if !Self::PRE_VALIDATED_UTF8 {
             #[cfg(feature = "span")]
             if let Err(utf) = from_utf8(raw) {
                 let mut err = E::unexpected_token();
@@ -1027,23 +1038,18 @@ impl<'a> Parser<'a, &'a str> {
         Self::new(s)
     }
 
-    /// Creates a parser from `&[u8]`, validating UTF-8 encoding.
-    ///
-    /// If the input is not valid UTF-8, the type of error returned is unspecified.
-    #[inline]
-    pub fn from_slice(s: &'a [u8]) -> Self {
-        // in case of invalid utf8 it will skip to the offending byte.
-        let mut tmp = unsafe { Self::new(from_utf8_unchecked(s)) };
-        if let Err(e) = from_utf8(s) {
-            tmp.inc(e.valid_up_to())
-        }
-        tmp
-    }
-
     /// Creates a parser from `&[u8]`, without validating UTF-8 encoding.
     #[inline]
     pub unsafe fn from_slice_unchecked(s: &'a [u8]) -> Self {
         Self::new(from_utf8_unchecked(s))
+    }
+}
+
+impl<'a> Parser<'a, &'a [u8]> {
+    /// Creates a parser from `&[u8]`, validating UTF-8 encoding.
+    #[inline]
+    pub fn from_slice(s: &'a [u8]) -> Self {
+        Self::new(s)
     }
 }
 
@@ -1054,21 +1060,18 @@ impl<'a> Parser<'a, &'a mut str> {
         Self::new(s)
     }
 
-    /// Creates a parser from `&mut [u8]` with UTF-8 validation, may perform In-situ parsing.
-    #[inline]
-    pub fn from_mut_slice(s: &'a mut [u8]) -> Self {
-        // in case of invalid utf8 it will skip to the offending byte.
-        let mut tmp = unsafe { Self::new(from_utf8_unchecked_mut(s)) };
-        if let Err(e) = from_utf8(tmp.src.as_bytes()) {
-            tmp.inc(e.valid_up_to())
-        }
-        tmp
-    }
-
     /// Creates a parser from `&mut [u8]` without UTF-8 validation, may perform In-situ parsing.
     #[inline]
     pub unsafe fn from_mut_slice_unchecked(s: &'a mut [u8]) -> Self {
         Self::new(from_utf8_unchecked_mut(s))
+    }
+}
+
+impl<'a> Parser<'a, &'a mut [u8]> {
+    /// Creates a parser from `&mut [u8]` with UTF-8 validation, may perform In-situ parsing.
+    #[inline]
+    pub fn from_mut_slice(s: &'a mut [u8]) -> Self {
+        Self::new(s)
     }
 }
 

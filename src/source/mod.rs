@@ -155,3 +155,107 @@ impl Source for &mut str {
         (**self).len()
     }
 }
+
+impl Source for &[u8] {
+    const UTF8: bool = false;
+    const INSITU: bool = false;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, _: usize) -> *mut u8 {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}
+
+impl Source for &mut [u8] {
+    const UTF8: bool = false;
+    const INSITU: bool = true;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, offset: usize) -> *mut u8 {
+        unsafe { self.as_mut_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}
+
+impl<const N: usize> Source for &[u8; N] {
+    const UTF8: bool = false;
+    const INSITU: bool = false;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, _: usize) -> *mut u8 {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}
+
+impl<const N: usize> Source for &mut [u8; N] {
+    const UTF8: bool = false;
+    const INSITU: bool = true;
+    const NULL_PADDED: bool = false;
+
+    type Volatility = NonVolatile;
+
+    #[inline(always)]
+    fn ptr(&mut self, offset: usize) -> *const u8 {
+        unsafe { self.as_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn ptr_mut(&mut self, offset: usize) -> *mut u8 {
+        unsafe { self.as_mut_ptr().add(offset) }
+    }
+
+    #[inline(always)]
+    fn trim(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn len(&mut self) -> usize {
+        (**self).len()
+    }
+}

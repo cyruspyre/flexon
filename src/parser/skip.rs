@@ -140,7 +140,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             break match self.cur() {
                 b'"' => unsafe {
-                    return match S::UTF8
+                    return match Self::PRE_VALIDATED_UTF8
                         || simdutf8::basic::from_utf8(from_raw_parts(
                             self.src.ptr(start),
                             self.idx() - start,
