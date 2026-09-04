@@ -6,8 +6,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     pub(crate) fn skip_value<E: ErrorBuilder>(&mut self) -> Result<(), E> {
         match self.skip_whitespace() {
             b'"' => self.skip_string(),
-            b'{' => self.skip_object(),
-            b'[' => self.skip_array(),
+            b'{' => self.depth_guard()?.skip_object(),
+            b'[' => self.depth_guard()?.skip_array(),
             0 => Err(E::expected_value()),
             _ => unsafe { self.skip_literal() },
         }
@@ -88,8 +88,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let err = loop {
             match tmp {
                 b'"' => self.skip_string(),
-                b'{' => self.skip_object(),
-                b'[' => self.skip_array(),
+                b'{' => self.depth_guard()?.skip_object(),
+                b'[' => self.depth_guard()?.skip_array(),
                 0 => return Err(E::eof()),
                 _ => unsafe { self.skip_literal() },
             }?;

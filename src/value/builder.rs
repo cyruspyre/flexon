@@ -158,6 +158,9 @@ pub trait ErrorBuilder {
     /// Unexpected token while parsing.
     fn unexpected_token() -> Self;
 
+    /// Input JSON exceeds depth limit.
+    fn depth_limit_exceeded() -> Self;
+
     /// Applies span information. The given offsets will be byte offsets.
     fn apply_span(&mut self, start: usize, end: usize);
 }

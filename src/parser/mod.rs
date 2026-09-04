@@ -4,7 +4,7 @@ mod unchecked;
 
 use crate::{
     JsonPointer,
-    config::{CTConfig, Config},
+    config::{CTConfig, Config, Depth},
     misc::*,
     simd::simd_u64,
     source::*,
@@ -43,6 +43,31 @@ union Cur {
     idx: usize,
     // "pinned" pointer from non volatile source.
     ptr: *mut u8,
+}
+
+struct DepthGuard<'a, 'de, S: Source, C: Config>(&'a mut Parser<'de, S, C>);
+
+impl<'de, S: Source, C: Config> core::ops::Deref for DepthGuard<'_, 'de, S, C> {
+    type Target = Parser<'de, S, C>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'de, S: Source, C: Config> core::ops::DerefMut for DepthGuard<'_, 'de, S, C> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+impl<S: Source, C: Config> Drop for DepthGuard<'_, '_, S, C> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        self.0.cfg.depth().decrease()
+    }
 }
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
@@ -156,8 +181,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
         match char {
             b'"' => self.skip_string(),
-            b'{' => self.skip_object(),
-            b'[' => self.skip_array(),
+            b'{' => self.depth_guard()?.skip_object(),
+            b'[' => self.depth_guard()?.skip_array(),
             0 => return Err(V::Error::expected_value()),
             _ => unsafe { self.skip_literal() },
         }?;
@@ -236,8 +261,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
                 match char {
                     b'"' => self.skip_string(),
-                    b'{' => self.skip_object(),
-                    b'[' => self.skip_array(),
+                    b'{' => self.depth_guard()?.skip_object(),
+                    b'[' => self.depth_guard()?.skip_array(),
                     0 => return Err(V::Error::expected_value()),
                     _ => self.skip_literal(),
                 }?;
@@ -249,8 +274,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
             } else {
                 match char {
                     b'"' => self.parse_string::<_, V::String, _>(),
-                    b'{' => self.parse_object(),
-                    b'[' => self.parse_array(),
+                    b'{' => self.depth_guard()?.parse_object(),
+                    b'[' => self.depth_guard()?.parse_array(),
                     0 => {
                         #[allow(unused_mut)]
                         let mut tmp = V::Error::expected_value();
@@ -339,6 +364,16 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline(always)]
     pub(crate) fn cur(&mut self) -> u8 {
         unsafe { *self.cur_ptr() }
+    }
+
+    #[inline(always)]
+    fn depth_guard<'b, E: ErrorBuilder>(&'b mut self) -> Result<DepthGuard<'b, 'a, S, C>, E> {
+        if self.cfg.depth().is_limit_reached() {
+            return Err(E::depth_limit_exceeded());
+        }
+
+        self.cfg.depth().increase();
+        Ok(DepthGuard(self))
     }
 
     pub(crate) fn skip_whitespace(&mut self) -> u8 {
@@ -452,8 +487,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         unsafe {
             match self.skip_whitespace() {
                 b'"' => self.parse_string::<_, V::String, V::Error>(),
-                b'{' => self.parse_object(),
-                b'[' => self.parse_array(),
+                b'{' => self.depth_guard()?.parse_object(),
+                b'[' => self.depth_guard()?.parse_array(),
                 0 => {
                     #[allow(unused_mut)]
                     let mut tmp = V::Error::expected_value();
@@ -577,8 +612,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let mut err = loop {
             arr.on_value(match tmp {
                 b'"' => self.parse_string::<_, V::String, _>(),
-                b'{' => self.parse_object(),
-                b'[' => self.parse_array(),
+                b'{' => self.depth_guard()?.parse_object(),
+                b'[' => self.depth_guard()?.parse_array(),
                 0 => {
                     let mut err = V::Error::eof();
                     #[cfg(feature = "span")]
@@ -1027,7 +1062,7 @@ impl<'a, S: Source> Parser<'a, S> {
     /// ```
     #[inline]
     pub fn new(src: S) -> Self {
-        Self::new_with(src, CTConfig)
+        Self::new_with(src, CTConfig::new())
     }
 }
 

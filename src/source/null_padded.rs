@@ -6,6 +6,7 @@ use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
 use core::{
     alloc::Layout, ops::Deref, ptr::NonNull, slice::from_raw_parts, str::from_utf8_unchecked,
 };
+#[cfg(feature = "std")]
 use std::io::{self, IoSlice, Write};
 
 /// Null padded buffer.
@@ -117,6 +118,7 @@ impl NullPadded<false> {
     }
 }
 
+#[cfg(feature = "std")]
 impl Write for NullPadded<false> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

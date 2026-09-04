@@ -39,6 +39,9 @@ pub enum Error {
 
     /// Number is bigger than it can represent.
     NumberOverflow,
+
+    /// Input JSON exceeds depth limit.
+    DepthLimitExceeded,
 }
 
 impl crate::value::builder::ErrorBuilder for Error {
@@ -105,6 +108,11 @@ impl crate::value::builder::ErrorBuilder for Error {
     #[inline]
     fn unexpected_token() -> Self {
         Self::UnexpectedToken
+    }
+
+    #[inline]
+    fn depth_limit_exceeded() -> Self {
+        Self::DepthLimitExceeded
     }
 
     #[inline]

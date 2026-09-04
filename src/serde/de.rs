@@ -2,7 +2,7 @@
 
 use crate::{
     JsonPointer, Parser,
-    config::Config,
+    config::{Config, Depth},
     misc::{ESC_LUT, NUM_LUT, unlikely},
     source::{Source, Volatility},
 };
@@ -191,7 +191,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                     self.src.trim(tmp);
                 }
 
-                visitor.visit_map(CommaSeparated::new(self))
+                visitor.visit_map(CommaSeparated::new(self)?)
             }
             b'[' => {
                 if S::Volatility::IS_VOLATILE {
@@ -199,7 +199,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                     self.src.trim(tmp);
                 }
 
-                let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
+                let tmp = visitor.visit_seq(CommaSeparated::new(self)?)?;
                 self.inc(1);
                 let tmp = match self.skip_whitespace_alt() {
                     b']' => return Ok(tmp),
@@ -650,7 +650,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
 
         let tmp = match self.skip_whitespace() {
             b'[' => {
-                let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
+                let tmp = visitor.visit_seq(CommaSeparated::new(self)?)?;
                 self.inc(1);
                 match self.skip_whitespace_alt() {
                     b']' => return Ok(tmp),
@@ -685,7 +685,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         }
 
         let tmp = match self.skip_whitespace() {
-            b'{' => return visitor.visit_map(CommaSeparated::new(self)),
+            b'{' => return visitor.visit_map(CommaSeparated::new(self)?),
             0 => Kind::Eof,
             _ => Kind::UnexpectedToken,
         };
@@ -700,9 +700,9 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
         visitor: V,
     ) -> Result<V::Value> {
         let tmp = match self.skip_whitespace() {
-            b'{' => return visitor.visit_map(CommaSeparated::new(self)),
+            b'{' => return visitor.visit_map(CommaSeparated::new(self)?),
             b'[' => {
-                let tmp = visitor.visit_seq(CommaSeparated::new(self))?;
+                let tmp = visitor.visit_seq(CommaSeparated::new(self)?)?;
                 self.inc(1);
                 match self.skip_whitespace_alt() {
                     b']' => return Ok(tmp),
@@ -725,7 +725,14 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
     ) -> Result<V::Value> {
         let tmp = match self.skip_whitespace() {
             b'{' => {
-                let tmp = visitor.visit_enum(VariantAccess(self))?;
+                if self.cfg.depth().is_limit_reached() {
+                    return Err(self.err(Kind::DepthLimitExceeded));
+                }
+
+                self.cfg.depth().increase();
+                let tmp = visitor.visit_enum(VariantAccess(self));
+                self.cfg.depth().decrease();
+                let tmp = tmp?;
 
                 self.inc(1);
                 match self.skip_whitespace() {
@@ -782,8 +789,20 @@ struct CommaSeparated<'a, 'de, S: Source, C: Config> {
 
 impl<'a, 'de, S: Source, C: Config> CommaSeparated<'a, 'de, S, C> {
     #[inline(always)]
-    fn new(de: &'a mut Parser<'de, S, C>) -> Self {
-        CommaSeparated { de, flag: true }
+    fn new(de: &'a mut Parser<'de, S, C>) -> Result<Self> {
+        if de.cfg.depth().is_limit_reached() {
+            return Err(de.err(Kind::DepthLimitExceeded));
+        }
+
+        de.cfg.depth().increase();
+        Ok(CommaSeparated { de, flag: true })
+    }
+}
+
+impl<S: Source, C: Config> Drop for CommaSeparated<'_, '_, S, C> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        self.de.cfg.depth().decrease()
     }
 }
 
@@ -1038,6 +1057,8 @@ pub enum Kind {
     LeadingZero,
     /// Number is bigger than it can represent.
     NumberOverflow,
+    /// Input JSON exceeds depth limit.
+    DepthLimitExceeded,
 }
 
 impl Error {
@@ -1086,6 +1107,7 @@ impl Display for Error {
             Kind::TrailingDecimal => "trailing decimal in number",
             Kind::LeadingZero => "leading zero in number",
             Kind::NumberOverflow => "number too large",
+            Kind::DepthLimitExceeded => "depth limit exceeded",
         })
     }
 }
@@ -1176,6 +1198,11 @@ const _: () = {
             Kind::UnexpectedToken
         }
 
+        #[inline]
+        fn depth_limit_exceeded() -> Self {
+            Kind::DepthLimitExceeded
+        }
+
         fn apply_span(&mut self, _: usize, _: usize) {}
     }
 
@@ -1244,6 +1271,11 @@ const _: () = {
         #[inline]
         fn unexpected_token() -> Self {
             Kind::UnexpectedToken.into()
+        }
+
+        #[inline]
+        fn depth_limit_exceeded() -> Self {
+            Kind::DepthLimitExceeded.into()
         }
 
         #[inline]

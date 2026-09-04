@@ -207,6 +207,11 @@ impl<E: ErrorBuilder> ErrorBuilder for Span<E> {
     }
 
     #[inline]
+    fn depth_limit_exceeded() -> Self {
+        Self::new(E::depth_limit_exceeded())
+    }
+
+    #[inline]
     fn apply_span(&mut self, start: usize, end: usize) {
         self.start = start;
         self.end = end;

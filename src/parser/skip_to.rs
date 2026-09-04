@@ -1,6 +1,6 @@
 use crate::{
     Parser,
-    config::Config,
+    config::{Config, Depth},
     misc::ESC_LUT,
     pointer::JsonPointer,
     source::{NonVolatile, Source},
@@ -56,6 +56,14 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         let mut char = self.skip_whitespace();
 
         'main: for pointer in p {
+            if self.cfg.depth().is_limit_reached() {
+                return Err(E::depth_limit_exceeded());
+            }
+
+            // depth will only ever increase as it follows the provided path.
+            // so in this case, no need to decrease it at all.
+            self.cfg.depth().increase();
+
             #[cfg(feature = "span")]
             let mut err_idx = usize::MAX;
             #[allow(unused_mut)]
@@ -97,8 +105,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
                     match char {
                         b'"' => self.skip_string(),
-                        b'{' => self.skip_object(),
-                        b'[' => self.skip_array(),
+                        b'{' => self.depth_guard()?.skip_object(),
+                        b'[' => self.depth_guard()?.skip_array(),
                         _ => unsafe { self.skip_literal() },
                     }?;
 
@@ -162,8 +170,8 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                     idx -= 1;
                     match char {
                         b'"' => self.skip_string(),
-                        b'{' => self.skip_object(),
-                        b'[' => self.skip_array(),
+                        b'{' => self.depth_guard()?.skip_object(),
+                        b'[' => self.depth_guard()?.skip_array(),
                         _ => unsafe { self.skip_literal() },
                     }?;
 

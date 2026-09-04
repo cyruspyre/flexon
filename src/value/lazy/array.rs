@@ -1,5 +1,6 @@
 use crate::{
     Parser,
+    config::{CTConfig, Unbounded},
     value::lazy::{Raw, Value},
 };
 use alloc::vec::Vec;
@@ -37,7 +38,7 @@ impl<'a> Array<'a> {
             }
         }
 
-        let mut tmp = Parser::new(self.raw);
+        let mut tmp = Parser::new_with(self.raw, CTConfig::new().depth_limit(Unbounded));
 
         loop {
             tmp.inc(1);
@@ -66,7 +67,7 @@ impl<'a> Array<'a> {
     /// Returns the actual number of elements by skipping and counting.
     pub fn actual_len(&self) -> usize {
         let mut count = 0;
-        let mut tmp = Parser::new(self.raw);
+        let mut tmp = Parser::new_with(self.raw, CTConfig::new().depth_limit(Unbounded));
 
         loop {
             tmp.inc(1);

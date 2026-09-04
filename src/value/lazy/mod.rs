@@ -6,6 +6,7 @@ mod object;
 
 use crate::{
     Parser,
+    config::{CTConfig, Unbounded},
     pointer::JsonPointer,
     value::{Number, borrowed::String},
 };
@@ -53,7 +54,7 @@ impl<'a> Raw<'a> {
     /// Trims the raw JSON value to its end excluding the trailing characters that are irrelevant to its type.
     #[inline]
     pub fn trim_to_value(&self) -> &'a str {
-        let mut tmp = Parser::new(self.0);
+        let mut tmp = Parser::new_with(self.0, CTConfig::new().depth_limit(Unbounded));
         match tmp.cur() {
             b'"' => tmp.skip_string_unchecked(),
             b'{' | b'[' => unsafe { tmp.skip_container_unchecked() },
@@ -189,7 +190,9 @@ impl<'a> Value<'a> {
         Some(match *self {
             Self::Number(v) => v,
             Self::Raw(Raw(s)) if unsafe { matches!(*s.as_ptr(), b'-' | b'0'..=b'9') } => unsafe {
-                *self = Self::Number(Parser::new(s).parse_number_unchecked());
+                let mut tmp = Parser::new_with(s, CTConfig::new().depth_limit(Unbounded));
+
+                *self = Self::Number(tmp.parse_number_unchecked());
 
                 match *self {
                     Self::Number(v) => v,
@@ -224,8 +227,10 @@ impl<'a> Value<'a> {
         Some(match *self {
             Self::String(ref mut v) => v,
             Self::Raw(Raw(s)) if unsafe { *s.as_ptr() == b'"' } => unsafe {
-                let tmp = Parser::new(s).parse_string_unchecked::<String, String>();
-                *self = Self::String(tmp);
+                let mut tmp = Parser::new_with(s, CTConfig::new().depth_limit(Unbounded));
+                let str = tmp.parse_string_unchecked::<String, String>();
+
+                *self = Self::String(str);
 
                 match self {
                     Self::String(v) => v,
@@ -344,7 +349,7 @@ impl<'a> Value<'a> {
         let Some(mut pointer) = iter.next() else {
             return Some(Value::Raw(Raw(src)));
         };
-        let mut tmp = Parser::new(src);
+        let mut tmp = Parser::new_with(src, CTConfig::new().depth_limit(Unbounded));
         let mut char = tmp.skip_whitespace();
 
         'main: loop {
@@ -414,9 +419,9 @@ impl<'a> Value<'a> {
     }
 }
 
-impl<'a> Parser<'a, &'a str> {
+impl<'a> Parser<'a, &'a str, CTConfig<Unbounded>> {
     #[inline]
-    pub(super) unsafe fn parse_number_unchecked(&mut self) -> Number {
+    unsafe fn parse_number_unchecked(&mut self) -> Number {
         let tmp = self.cur();
 
         let neg = tmp == b'-';
