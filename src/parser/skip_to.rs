@@ -107,6 +107,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         b'"' => self.skip_string(),
                         b'{' => self.depth_guard()?.skip_object(),
                         b'[' => self.depth_guard()?.skip_array(),
+                        0 => break E::expected_value(),
                         _ => unsafe { self.skip_literal() },
                     }?;
 
@@ -172,6 +173,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
                         b'"' => self.skip_string(),
                         b'{' => self.depth_guard()?.skip_object(),
                         b'[' => self.depth_guard()?.skip_array(),
+                        0 => break E::eof(),
                         _ => unsafe { self.skip_literal() },
                     }?;
 

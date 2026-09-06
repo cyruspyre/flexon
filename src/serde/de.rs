@@ -1471,15 +1471,14 @@ where
 /// # use flexon::{jsonp, serde::de::Kind};
 /// let src = r#"{"pair": [64,]}"#;
 /// let num: u8 = flexon::get_from(src, jsonp!["pair", 0]).unwrap();
-/// let invalid = flexon::get_from::<_, u8, _>(src, jsonp!["pair", 1]);
+/// let invalid = flexon::get_from::<u8, _>(src, jsonp!["pair", 1]);
 ///
 /// assert_eq!(num, 64);
 /// assert_eq!(invalid.unwrap_err().kind(), &Kind::TrailingComma);
 /// ```
 #[inline]
-pub fn get_from<'a, S, T, P>(src: S, path: P) -> Result<T>
+pub fn get_from<'a, T, P>(src: impl Source + 'a, path: P) -> Result<T>
 where
-    S: Source + 'a,
     T: Deserialize<'a>,
     P: IntoIterator<Item: JsonPointer>,
 {
