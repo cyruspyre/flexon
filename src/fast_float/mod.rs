@@ -22,36 +22,51 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
         neg: bool,
         start: usize,
     ) -> Option<f64> {
+        let char = loop {
+            if !S::NULL_PADDED && self.idx() == self.src.len() {
+                break 0;
+            }
+
+            let char = self.cur();
+            let tmp = char.wrapping_sub(b'0');
+
+            if tmp > 9 {
+                break char;
+            }
+
+            mantissa = mantissa.wrapping_mul(10).wrapping_add(tmp as u64);
+            self.inc(1);
+        };
+
+        let int_end = self.idx();
         let mut n_digits = self.idx() - start;
         let mut exponent = 0;
-        let mut exp_number = 0;
-        let int_end = self.idx();
 
-        match self.cur() {
-            b'.' => {
-                self.inc(1);
-                let stamp = self.idx();
-                self.parse_mantissa(&mut mantissa);
-                let tmp = self.idx() - stamp;
+        let cond = if char == b'.' {
+            self.inc(1);
+            let stamp = self.idx();
+            self.parse_mantissa(&mut mantissa);
+            let tmp = self.idx() - stamp;
 
-                if tmp == 0 {
-                    return None;
-                }
-
-                exponent = (tmp as i64).wrapping_neg();
-                n_digits += tmp;
-
-                if (S::NULL_PADDED || self.idx() < self.src.len())
-                    && matches!(self.cur(), b'e' | b'E')
-                {
-                    exp_number = self.parse_scientific()?
-                } else {
-                    self.dec(1)
-                }
+            if tmp == 0 {
+                return None;
             }
-            b'e' | b'E' => exp_number = self.parse_scientific()?,
-            _ => {}
-        }
+
+            exponent = (tmp as i64).wrapping_neg();
+            n_digits += tmp;
+
+            let cond = (S::NULL_PADDED || self.idx() < self.src.len())
+                && matches!(self.cur(), b'e' | b'E');
+
+            self.dec(!cond as usize);
+            cond
+        } else {
+            matches!(char, b'e' | b'E')
+        };
+        let exp_number = match cond {
+            true => self.parse_scientific()?,
+            _ => 0,
+        };
 
         exponent += exp_number;
         let num = 'tmp: {
@@ -97,13 +112,13 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
                 self.try_parse_19digits(&mut idx, &mut mantissa);
 
                 exponent = if mantissa >= MIN_19DIGIT_INT {
-                    (int_end - idx) as _ // big int
+                    (int_end - idx) as i64 // big int
                 } else {
                     // cur idx will be at '.'
                     idx += 1;
                     let before = idx;
                     self.try_parse_19digits(&mut idx, &mut mantissa);
-                    (idx - before).wrapping_neg() as _
+                    (idx - before).wrapping_neg() as i64
                 };
                 exponent += exp_number; // add back the explicit part
             }

@@ -951,67 +951,51 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline(always)]
     pub(crate) unsafe fn parse_u64(&mut self) -> (u64, bool) {
         let mut val = 0;
-        let mut overflow = false;
 
         while S::NULL_PADDED || self.idx() + 8 <= self.src.len() {
             let Some(chunk) = simd_u64(self.cur_ptr()) else {
                 break;
             };
 
-            overflow = val > u64::MAX / 100_000_000;
+            if val > u64::MAX / 100_000_000 {
+                return (val, false);
+            }
+
             let mul = val.wrapping_mul(100_000_000);
-            overflow = overflow || mul > u64::MAX - chunk;
+
+            if mul > u64::MAX - chunk {
+                return (val, false);
+            }
 
             val = mul.wrapping_add(chunk);
             self.inc(8);
-
-            if overflow {
-                break;
-            }
         }
 
-        if !overflow {
-            loop {
-                if !S::NULL_PADDED && self.idx() == self.src.len() {
-                    return (val, true);
-                }
-
-                let cur = self.cur();
-                let num = cur.wrapping_sub(b'0');
-
-                if num > 9 {
-                    return (val, !NUM_LUT[cur as usize]);
-                }
-
-                overflow = val > u64::MAX / 10;
-                let mul = val.wrapping_mul(10);
-                overflow = overflow || mul > u64::MAX - num as u64;
-
-                val = mul.wrapping_add(num as u64);
-                self.inc(1);
-
-                if overflow {
-                    break;
-                }
-            }
-        }
-
-        // ignore overflow as it will be handled in float parsing
         loop {
             if !S::NULL_PADDED && self.idx() == self.src.len() {
-                break;
+                return (val, true);
             }
 
-            let tmp = self.cur().wrapping_sub(b'0') as u64;
-            if tmp > 9 {
-                break;
+            let cur = self.cur();
+            let num = cur.wrapping_sub(b'0');
+
+            if num > 9 {
+                return (val, !NUM_LUT[cur as usize]);
             }
 
-            val = val.wrapping_mul(10).wrapping_add(tmp);
+            if val > u64::MAX / 10 {
+                return (val, false);
+            }
+
+            let mul = val.wrapping_mul(10);
+
+            if mul > u64::MAX - num as u64 {
+                return (val, false);
+            }
+
+            val = mul.wrapping_add(num as u64);
             self.inc(1);
         }
-
-        (val, false)
     }
 }
 
