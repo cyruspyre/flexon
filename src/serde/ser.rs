@@ -152,56 +152,51 @@ impl<'a, W: Write, F: Format> ser::Serializer for &'a mut Serializer<W, F> {
 
         self.write(b'"')?;
         if v.len() <= 8 {
-            let mut rem = v.len();
+            let mut idx = 0;
             loop {
-                if rem == 0 {
+                if idx == v.len() {
                     self.write_n(v.as_bytes())?;
                     return self.write(b'"');
                 }
 
-                if unsafe { ESC[*v.as_bytes().get_unchecked(v.len() - rem) as usize] != 0 } {
+                if ESC[v.as_bytes()[idx] as usize] != 0 {
                     break;
                 }
-                rem -= 1;
+
+                idx += 1;
             }
         }
 
-        let mut tmp = crate::Parser::new(v);
+        let mut idx = 0;
         let mut offset = 0;
 
         loop {
-            if tmp.simd_str() {
-                continue;
-            }
-
-            tmp.inc(1);
-            if tmp.idx() == v.len() {
-                break;
-            }
-
-            let cur = tmp.cur();
+            let cur = unsafe { *v.as_ptr().add(idx) };
             let esc = ESC[cur as usize];
 
-            if esc == 0 {
-                continue;
+            idx += 1;
+            if esc != 0 {
+                unsafe { self.write_n(v.as_bytes().get_unchecked(offset..idx - 1))? }
+                offset = idx;
+
+                if esc != b'u' {
+                    self.write_n(&[b'\\', esc])
+                } else {
+                    unsafe {
+                        let esc = CTRL.as_ptr().add(cur as usize * 2);
+                        let seq = [b'\\', b'u', b'0', b'0', *esc, *esc.add(1)];
+
+                        self.write_n(&seq)
+                    }
+                }?
             }
 
-            unsafe { self.write_n(v.get_unchecked(offset..tmp.idx()).as_bytes())? }
-            offset = tmp.idx() + 1;
-
-            if esc != b'u' {
-                self.write_n(&[b'\\', esc])
-            } else {
-                unsafe {
-                    let esc = CTRL.as_ptr().add(cur as usize * 2);
-                    let seq = [b'\\', b'u', b'0', b'0', *esc, *esc.add(1)];
-
-                    self.write_n(&seq)
-                }
-            }?
+            if idx == v.len() {
+                break;
+            }
         }
 
-        unsafe { self.write_n(v.get_unchecked(offset..).as_bytes())? }
+        unsafe { self.write_n(v.as_bytes().get_unchecked(offset..))? }
         self.write(b'"')
     }
 
