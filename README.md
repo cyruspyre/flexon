@@ -106,6 +106,6 @@ Same as other crates, nothing fancy.
 
 `alloc` (default): Quite a lot of things depend on it, but the crate remains usable either way. When disabled, strings can only be parsed in place.
 
-# Performance
+## Performance
 
 Expect it to be more or less faster than all the other JSON parser crates out there, at least for deserialization. The benchmark section has been removed, as keeping up with crate version updates is a hassle. For third-party benchmarks, refer to [rust_serialization_benchmark](https://github.com/djkoloski/rust_serialization_benchmark).
