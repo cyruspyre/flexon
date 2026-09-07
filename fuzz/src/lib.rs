@@ -1,8 +1,5 @@
 use arbitrary::Arbitrary;
-use flexon::{
-    pointer::JsonPointer,
-    source::{NonVolatile, Source},
-};
+use flexon::pointer::JsonPointer;
 use serde::{Serialize, ser::SerializeMap};
 
 #[derive(Arbitrary, Debug)]
@@ -41,75 +38,17 @@ impl Serialize for AValue<'_> {
     }
 }
 
-#[repr(transparent)]
-pub struct Slice<'a>(pub &'a [u8]);
-
-impl Source for Slice<'_> {
-    const UTF8: bool = false;
-    const INSITU: bool = false;
-    const NULL_PADDED: bool = false;
-
-    type Volatility = NonVolatile;
-
-    #[inline(always)]
-    fn ptr(&mut self, offset: usize) -> *const u8 {
-        unsafe { self.0.as_ptr().add(offset) }
-    }
-
-    #[inline(always)]
-    fn ptr_mut(&mut self, _: usize) -> *mut u8 {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn trim(&mut self, _: usize) {}
-
-    #[inline(always)]
-    fn len(&mut self) -> usize {
-        self.0.len()
-    }
-}
-
-#[repr(transparent)]
-pub struct SliceMut<'a>(pub &'a mut [u8]);
-
-impl Source for SliceMut<'_> {
-    const UTF8: bool = false;
-    const INSITU: bool = true;
-    const NULL_PADDED: bool = false;
-
-    type Volatility = NonVolatile;
-
-    #[inline(always)]
-    fn ptr(&mut self, offset: usize) -> *const u8 {
-        unsafe { self.0.as_ptr().add(offset) }
-    }
-
-    #[inline(always)]
-    fn ptr_mut(&mut self, offset: usize) -> *mut u8 {
-        unsafe { self.0.as_mut_ptr().add(offset) }
-    }
-
-    #[inline(always)]
-    fn trim(&mut self, _: usize) {}
-
-    #[inline(always)]
-    fn len(&mut self) -> usize {
-        self.0.len()
-    }
-}
-
 #[derive(Arbitrary, Debug)]
 pub enum Pointer<'a> {
     Index(usize),
-    Key(&'a [u8]),
+    Key(&'a str),
 }
 
 impl JsonPointer for &Pointer<'_> {
     #[inline]
     fn as_key(&self) -> Option<&str> {
         match self {
-            Pointer::Key(v) => unsafe { Some(str::from_utf8_unchecked(v)) },
+            Pointer::Key(v) => Some(v),
             _ => None,
         }
     }

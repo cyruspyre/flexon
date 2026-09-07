@@ -36,7 +36,7 @@ impl<'a> Arbitrary<'a> for Input<'a> {
 
                     let idx = u.choose_index(v.len())?;
                     let (k, v) = v.get_unchecked_mut(idx);
-                    path.push(Pointer::Key(k.as_bytes()));
+                    path.push(Pointer::Key(k));
                     cur = v;
                 },
                 _ => return Ok(Input { val: root, path }),
@@ -47,13 +47,8 @@ impl<'a> Arbitrary<'a> for Input<'a> {
 
 fuzz_target!(|data: Input| unsafe {
     let s0 = flexon::to_string(data.val).unwrap_unchecked();
-    let mut s1 = NullPadded::from_str(&s0);
+    let s1 = NullPadded::from_str(&s0);
 
     _ = Parser::new(&*s0).parse_at_unchecked::<flexon::Value, _>(&data.path);
     _ = Parser::new(&s1).parse_at_unchecked::<flexon::Value, _>(&data.path);
-
-    _ = flexon::get_from_unchecked::<_, flexon::Value, _>(&*s0, &data.path);
-    _ = flexon::get_from_unchecked::<_, flexon::Value, _>(&mut *s0.clone(), &data.path);
-    _ = flexon::get_from_unchecked::<_, flexon::Value, _>(&s1, &data.path);
-    _ = flexon::get_from_unchecked::<_, flexon::Value, _>(&mut s1, &data.path);
 });
