@@ -95,7 +95,11 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
                     {
                         layout = b;
                         new_cap = a;
-                        realloc(this.buf, layout, new_cap)
+                        realloc(
+                            this.buf,
+                            Layout::array::<u8>(this.cap).unwrap_unchecked(),
+                            new_cap,
+                        )
                     } else {
                         capacity_overflow()
                     }
@@ -123,6 +127,7 @@ impl<const UTF8: bool, R: Read> Source for Reader<UTF8, R> {
                 .unwrap();
         }
 
+        // println!("{} {} {}", self.len, self.recent, self.offset);
         if self.len - (self.recent - self.offset) < 64 {
             unsafe { load(self) }
         }
