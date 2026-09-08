@@ -201,7 +201,7 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
             idx += 1;
         }
 
-        // first char wil always be '-' or ascii digit
+        // first char will always be '-' or ascii digit
         idx += (*self.src.ptr(start) ^ b'0').wrapping_sub(1) as usize >> 7;
         self.parse_digits(&mut idx, |digit| d.try_add_digit(digit));
 

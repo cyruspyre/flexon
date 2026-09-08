@@ -20,7 +20,7 @@ pub enum Error {
     ControlCharacter,
 
     /// Invalid escape sequence in string.
-    InvalidEscapeSequnce,
+    InvalidEscapeSequence,
 
     /// Invalid JSON literal.
     InvalidLiteral,
@@ -72,7 +72,7 @@ impl crate::value::builder::ErrorBuilder for Error {
 
     #[inline]
     fn invalid_escape() -> Self {
-        Self::InvalidEscapeSequnce
+        Self::InvalidEscapeSequence
     }
 
     #[inline]

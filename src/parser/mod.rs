@@ -987,7 +987,7 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
     /// Skips to the given path and parses JSON into the specified type.
     ///
-    /// Same as [`Parser::parse_at`] but wihout validation. There is no
+    /// Same as [`Parser::parse_at`] but without validation. There is no
     /// guarantee if the JSON is invalid or the path does not exist.
     ///
     /// # Example
@@ -1019,7 +1019,7 @@ impl<'a, S: Source<Volatility = NonVolatile>, C: Config> Parser<'a, S, C> {
 }
 
 impl<'a, S: Source> Parser<'a, S> {
-    /// Createa a parser with the given source and default configuration.
+    /// Creates a parser with the given source and default configuration.
     ///
     /// This is equivalent to calling `Parser::new_with(src, CTConfig)`.
     ///

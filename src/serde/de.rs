@@ -295,7 +295,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                             if S::NULL_PADDED && tmp == 0 {
                                 Kind::UnclosedString
                             } else {
-                                Kind::InvalidEscapeSequnce
+                                Kind::InvalidEscapeSequence
                             }
                         }
                         0x20.. => continue,
@@ -389,7 +389,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                                     continue;
                                 }
 
-                                Kind::InvalidEscapeSequnce
+                                Kind::InvalidEscapeSequence
                             }
                             0x20.. => continue,
                             _ => Kind::ControlCharacter,
@@ -527,7 +527,7 @@ impl<'de, S: Source, C: Config> Deserializer<'de> for &mut Parser<'de, S, C> {
                                 if S::NULL_PADDED && tmp == 0 {
                                     Kind::UnclosedString
                                 } else {
-                                    Kind::InvalidEscapeSequnce
+                                    Kind::InvalidEscapeSequence
                                 }
                             }
                             0x20.. => continue,
@@ -1044,7 +1044,7 @@ pub enum Kind {
     /// Found raw control characters inside string while parsing.
     ControlCharacter,
     /// Invalid escape sequence in string.
-    InvalidEscapeSequnce,
+    InvalidEscapeSequence,
     /// Invalid JSON literal.
     InvalidLiteral,
     /// Comma after the last value of an array or an object.
@@ -1100,7 +1100,7 @@ impl Display for Error {
             Kind::UnexpectedToken => "unexpected token",
             Kind::UnclosedString => "unclosed string",
             Kind::ControlCharacter => "control character inside string",
-            Kind::InvalidEscapeSequnce => "invalid escape sequence",
+            Kind::InvalidEscapeSequence => "invalid escape sequence",
             Kind::InvalidLiteral => "invalid literal",
             Kind::TrailingComma => "trailing comma",
             Kind::LeadingDecimal => "leading decimal in number",
@@ -1160,7 +1160,7 @@ const _: () = {
 
         #[inline]
         fn invalid_escape() -> Self {
-            Kind::InvalidEscapeSequnce
+            Kind::InvalidEscapeSequence
         }
 
         #[inline]
@@ -1235,7 +1235,7 @@ const _: () = {
 
         #[inline]
         fn invalid_escape() -> Self {
-            Kind::InvalidEscapeSequnce.into()
+            Kind::InvalidEscapeSequence.into()
         }
 
         #[inline]

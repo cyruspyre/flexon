@@ -94,7 +94,7 @@ fn compute_product_approx(q: i64, w: u64, precision: usize) -> (u64, u64) {
         0xFFFF_FFFF_FFFF_FFFF_u64
     };
     let index = (q - SMALLEST_POWER_OF_FIVE as i64) as usize;
-    // NOTE: this cannot be ellided by the compiler, but the proof the index
+    // NOTE: this cannot be elided by the compiler, but the proof the index
     // must be within the bounds is non-trivial, especially because this
     // comes from a parsed result. Since this is unlikely to have any major
     // performance implications, as is determined empirically, we keep the
