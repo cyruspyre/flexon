@@ -1,5 +1,5 @@
 use crate::{Parser, config::Config, misc::*, source::Source, value::builder::ErrorBuilder};
-use core::{hint::cold_path, slice::from_raw_parts, str::from_utf8_unchecked};
+use core::{hint::cold_path, slice::from_raw_parts};
 
 impl<'a, S: Source, C: Config> Parser<'a, S, C> {
     #[inline]
@@ -197,44 +197,27 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
     #[inline(never)]
     unsafe fn skip_unicode_escape(&mut self) -> bool {
-        self.inc(4);
-        if !S::NULL_PADDED && self.idx() >= self.src.len() {
-            self.dec(4);
+        if !S::NULL_PADDED && self.idx() + 4 >= self.src.len() {
             return false;
         }
 
-        let codepoint = match u16::from_str_radix(
-            from_utf8_unchecked(from_raw_parts(self.cur_ptr().sub(3), 4)),
-            16,
-        ) {
-            Ok(v) => v as u32,
+        match parse_4hex(self.cur_ptr().add(1)) {
+            Some(0xDC00..=0xDFFF) => return false,
+            Some(0xD800..=0xDFFF) => {
+                if !S::NULL_PADDED && self.idx() + 10 >= self.src.len()
+                    || from_raw_parts(self.cur_ptr().add(5), 2) != br"\u"
+                {
+                    return false;
+                }
+
+                let Some(0xDC00..=0xDFFF) = parse_4hex(self.cur_ptr().add(7)) else {
+                    return false;
+                };
+
+                self.inc(10);
+            }
+            Some(_) => self.inc(4),
             _ => return false,
-        };
-
-        if (0xD800..=0xDFFF).contains(&codepoint) {
-            if codepoint >= 0xDC00 {
-                return false;
-            }
-
-            self.inc(6);
-            if !S::NULL_PADDED && self.idx() >= self.src.len()
-                || from_raw_parts(self.cur_ptr().sub(5), 2) != br"\u"
-            {
-                self.dec(6);
-                return false;
-            }
-
-            let low = match u16::from_str_radix(
-                from_utf8_unchecked(from_raw_parts(self.cur_ptr().sub(3), 4)),
-                16,
-            ) {
-                Ok(v) => v as u32,
-                _ => return false,
-            };
-
-            if !(0xDC00..=0xDFFF).contains(&low) {
-                return false;
-            }
         }
 
         // `codepoint` <= 0x10FFFF (char::MAX) excluding `0xD800..=0xDFFF`

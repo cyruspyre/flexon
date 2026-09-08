@@ -760,46 +760,31 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
         &mut self,
         buf: &'esc mut [u8; 4],
     ) -> Option<&'esc [u8]> {
-        self.inc(4);
-        if !S::NULL_PADDED && self.idx() >= self.src.len() {
-            self.dec(4);
+        if !S::NULL_PADDED && self.idx() + 4 >= self.src.len() {
             return None;
         }
 
-        let mut codepoint = match u16::from_str_radix(
-            from_utf8_unchecked(from_raw_parts(self.cur_ptr().sub(3), 4)),
-            16,
-        ) {
-            Ok(v) => v as u32,
-            _ => return None,
+        let Some(mut codepoint) = parse_4hex(self.cur_ptr().add(1)) else {
+            return None;
         };
 
-        if (0xD800..=0xDFFF).contains(&codepoint) {
-            if codepoint >= 0xDC00 {
-                return None;
+        match codepoint {
+            0xDC00..=0xDFFF => return None,
+            0xD800..=0xDBFF => {
+                if !S::NULL_PADDED && self.idx() + 10 >= self.src.len()
+                    || from_raw_parts(self.cur_ptr().add(5), 2) != br"\u"
+                {
+                    return None;
+                }
+
+                let Some(low @ 0xDC00..=0xDFFF) = parse_4hex(self.cur_ptr().add(7)) else {
+                    return None;
+                };
+
+                codepoint = 0x10000 + (codepoint - 0xD800 << 10 | low - 0xDC00);
+                self.inc(10);
             }
-
-            self.inc(6);
-            if !S::NULL_PADDED && self.idx() >= self.src.len()
-                || from_raw_parts(self.cur_ptr().sub(5), 2) != br"\u"
-            {
-                self.dec(6);
-                return None;
-            }
-
-            let low = match u16::from_str_radix(
-                from_utf8_unchecked(from_raw_parts(self.cur_ptr().sub(3), 4)),
-                16,
-            ) {
-                Ok(v) => v as u32,
-                _ => return None,
-            };
-
-            if !(0xDC00..=0xDFFF).contains(&low) {
-                return None;
-            }
-
-            codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (low - 0xDC00));
+            _ => self.inc(4),
         }
 
         // `codepoint` <= 0x10FFFF (char::MAX) excluding `0xD800..=0xDFFF`
