@@ -32,9 +32,9 @@ impl<'a> Array<'a> {
 
     /// Returns a mutable reference to the value at the given index, skipping and finding if necessary.
     pub fn get(&mut self, mut idx: usize) -> Option<&mut Value<'a>> {
-        for (i, v) in &mut self.buf {
-            if *i == idx {
-                return Some(v);
+        for i in 0..self.buf.len() {
+            if self.buf[i].0 == idx {
+                return Some(&mut self.buf[i].1);
             }
         }
 

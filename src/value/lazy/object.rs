@@ -38,9 +38,9 @@ impl<'a> Object<'a> {
 
     /// Returns a mutable reference to the value associated with the given key, skipping and finding if necessary.
     pub fn get(&mut self, key: &str) -> Option<&mut Value<'a>> {
-        for (k, v) in &mut self.buf {
-            if k.as_str() == key {
-                return Some(v);
+        for i in 0..self.buf.len() {
+            if self.buf[i].0.as_str() == key {
+                return Some(&mut self.buf[i].1);
             }
         }
 
