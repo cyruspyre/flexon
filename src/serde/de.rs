@@ -96,21 +96,22 @@ impl<S: Source, C: Config> Parser<'_, S, C> {
 
             'int: {
                 if is_int {
-                    self.dec(1);
                     return if neg {
-                        if val > 9223372036854775808 {
+                        let val @ ..0 = val.wrapping_neg() as i64 else {
                             break 'int;
-                        }
+                        };
 
-                        visitor.visit_i64(val.wrapping_neg() as _)
+                        self.dec(1);
+                        visitor.visit_i64(val)
                     } else {
+                        self.dec(1);
                         visitor.visit_u64(val)
                     };
                 }
-            }
 
-            if start == self.idx() {
-                return Err(self.err(Kind::LeadingDecimal));
+                if start == self.idx() {
+                    return Err(self.err(Kind::LeadingDecimal));
+                }
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {

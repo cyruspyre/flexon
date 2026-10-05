@@ -853,28 +853,29 @@ impl<'a, S: Source, C: Config> Parser<'a, S, C> {
 
             'int: {
                 if is_int {
-                    self.dec(1);
                     let mut tmp = if neg {
-                        if val > 9223372036854775808 {
+                        let val @ ..0 = val.wrapping_neg() as i64 else {
                             break 'int;
-                        }
+                        };
 
-                        V::integer(val.wrapping_neg(), true)
+                        V::integer(val as u64, true)
                     } else {
                         V::integer(val, false)
                     };
 
+                    self.dec(1);
                     #[cfg(feature = "span")]
                     tmp.apply_span(stamp, self.idx());
+
                     return Ok(tmp);
                 }
-            }
 
-            if start == self.idx() {
-                let mut tmp = V::Error::leading_decimal();
-                #[cfg(feature = "span")]
-                tmp.apply_span(stamp, stamp);
-                return Err(tmp);
+                if start == self.idx() {
+                    let mut tmp = V::Error::leading_decimal();
+                    #[cfg(feature = "span")]
+                    tmp.apply_span(stamp, stamp);
+                    return Err(tmp);
+                }
             }
 
             if let Some(val) = self.parse_f64(val, neg, start) {
