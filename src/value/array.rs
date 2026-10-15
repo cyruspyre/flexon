@@ -1,8 +1,8 @@
 use crate::{misc::capacity_overflow, value::builder::ArrayBuilder};
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc};
+use alloc::alloc::{Layout, alloc, dealloc, handle_alloc_error, realloc};
 use core::{
-    alloc::Layout,
     fmt::{Debug, Formatter, Result},
+    mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     ptr::{NonNull, slice_from_raw_parts_mut},
     slice::{from_raw_parts, from_raw_parts_mut},
@@ -12,37 +12,44 @@ use core::{
 pub struct Array<T> {
     buf: NonNull<T>,
     len: usize,
+    // `cap` is non-zero ONLY when `Self` actually allocated something
     cap: usize,
 }
 
-impl<T> ArrayBuilder<T> for Array<T> {
+impl<T> Array<T> {
+    const ZST: bool = size_of::<T>() == 0;
+
+    /// Creates an empty array.
     #[inline]
-    fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             buf: NonNull::dangling(),
             len: 0,
             cap: 0,
         }
     }
+}
+
+impl<T> ArrayBuilder<T> for Array<T> {
+    #[inline]
+    fn new() -> Self {
+        Self::new()
+    }
 
     #[inline]
     fn with_capacity(cap: usize) -> Self {
-        Self {
-            buf: if cap != 0 {
-                let Ok(layout) = Layout::array::<T>(cap) else {
-                    capacity_overflow()
-                };
-
-                match unsafe { NonNull::new(alloc(layout).cast()) } {
-                    Some(v) => v,
-                    _ => handle_alloc_error(layout),
-                }
-            } else {
-                NonNull::dangling()
+        let Ok(layout) = Layout::array::<T>(cap) else {
+            capacity_overflow()
+        };
+        let (buf, cap) = match layout.size() {
+            0 => (NonNull::dangling(), 0),
+            _ => match unsafe { NonNull::new(alloc(layout).cast()) } {
+                Some(v) => (v, cap),
+                _ => handle_alloc_error(layout),
             },
-            len: 0,
-            cap,
-        }
+        };
+
+        Self { buf, cap, len: 0 }
     }
 
     #[inline]
@@ -52,25 +59,27 @@ impl<T> ArrayBuilder<T> for Array<T> {
 
     #[inline]
     fn on_value(&mut self, val: T) {
-        self.len += 1;
+        let new_len = match self.len.overflowing_add(1) {
+            (_, true) if Self::ZST => capacity_overflow(),
+            (v, _) => v, // won't ever overflow for non zst
+        };
 
-        if self.cap < self.len {
-            if let Some(new_cap) = self.len.checked_mul(2)
+        if !Self::ZST && self.cap < new_len {
+            if let Some(new_cap) = new_len.checked_mul(2)
                 && let Ok(layout) = Layout::array::<T>(new_cap)
             {
-                let new_buf = unsafe {
-                    if self.cap != 0 {
+                let raw = match self.cap {
+                    0 => unsafe { alloc(layout) },
+                    _ => unsafe {
                         realloc(
                             self.buf.as_ptr().cast(),
                             Layout::array::<T>(self.cap).unwrap_unchecked(),
                             layout.size(),
                         )
-                    } else {
-                        alloc(layout)
-                    }
+                    },
                 };
 
-                match NonNull::new(new_buf.cast()) {
+                match NonNull::new(raw.cast()) {
                     Some(v) => {
                         self.cap = new_cap;
                         self.buf = v;
@@ -82,7 +91,8 @@ impl<T> ArrayBuilder<T> for Array<T> {
             }
         }
 
-        unsafe { self.buf.add(self.len).sub(1).write(val) }
+        unsafe { self.buf.add(self.len).write(val) }
+        self.len += 1;
     }
 
     #[inline]
@@ -98,32 +108,56 @@ impl<T: PartialEq> PartialEq for Array<T> {
 
 impl<T: Eq> Eq for Array<T> {}
 
-impl<T: Clone> Clone for Array<T> {
-    fn clone(&self) -> Self {
-        if self.len != 0 {
-            unsafe {
-                let layout = Layout::array::<T>(self.len).unwrap_unchecked();
-                let Some(buf) = NonNull::new(alloc(layout).cast()) else {
+impl<T, const N: usize> From<[T; N]> for Array<T> {
+    fn from(val: [T; N]) -> Self {
+        let val = ManuallyDrop::new(val);
+        let Ok(layout) = Layout::array::<T>(N) else {
+            capacity_overflow()
+        };
+        let (buf, cap) = match layout.size() {
+            0 => (NonNull::dangling(), 0),
+            _ => unsafe {
+                let Some(buf) = NonNull::new(alloc(layout).cast::<T>()) else {
                     handle_alloc_error(layout)
                 };
 
-                for i in 0..self.len {
-                    buf.add(i).write(self.buf.add(i).as_ref().clone())
-                }
+                buf.as_ptr().copy_from_nonoverlapping(val.as_ptr(), N);
+                (buf, N)
+            },
+        };
 
-                Self {
-                    buf,
-                    len: self.len,
-                    cap: self.len,
-                }
+        Self { buf, cap, len: N }
+    }
+}
+
+impl<T> Default for Array<T> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Clone> Clone for Array<T> {
+    fn clone(&self) -> Self {
+        let layout = unsafe { Layout::array::<T>(self.len).unwrap_unchecked() };
+        let (buf, cap) = match layout.size() {
+            0 => (NonNull::dangling(), 0),
+            _ => match unsafe { NonNull::new(alloc(layout).cast()) } {
+                Some(v) => (v, self.len),
+                _ => handle_alloc_error(layout),
+            },
+        };
+        let mut new = Self { buf, cap, len: 0 };
+
+        for i in 0..self.len {
+            unsafe {
+                let tmp = self.buf.add(i).as_ref().clone();
+                new.buf.add(i).write(tmp);
             }
-        } else {
-            Self {
-                buf: NonNull::dangling(),
-                len: 0,
-                cap: 0,
-            }
+            new.len += 1;
         }
+
+        new
     }
 }
 
@@ -152,9 +186,10 @@ impl<T: Debug> Debug for Array<T> {
 
 impl<T> Drop for Array<T> {
     fn drop(&mut self) {
-        if self.cap != 0 {
-            unsafe {
-                slice_from_raw_parts_mut(self.buf.as_ptr(), self.len).drop_in_place();
+        unsafe {
+            slice_from_raw_parts_mut(self.buf.as_ptr(), self.len).drop_in_place();
+
+            if self.cap != 0 {
                 dealloc(
                     self.buf.as_ptr().cast(),
                     Layout::array::<T>(self.cap).unwrap_unchecked(),
